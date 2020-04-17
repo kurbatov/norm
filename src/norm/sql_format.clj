@@ -1,0 +1,169 @@
+(ns norm.sql-format
+  (:require [clojure.string :as str]
+            [clojure.walk :as walk]
+            [camel-snake-kebab.core :refer [->snake_case_string]]))
+
+;; Formatting
+
+(defn prefix [ns-keyword name-keyword]
+  (keyword
+   (str
+    (when-let [n (namespace ns-keyword)] (str n "."))
+    (name ns-keyword)
+    (when-let [n (namespace name-keyword)] (str "." n)))
+   (name name-keyword)))
+
+(defn prefixed? [prefix key]
+  (str/starts-with?
+   (or (namespace key) "")
+   (str (when-let [n (namespace prefix)] (str n ".")) (name prefix))))
+
+(defn sql-quote [x] (str \" x \"))
+(defn wrap [x] (str "(" x ")"))
+(defn infix [k op v] (str/join " " [k op v]))
+(defn group [op vs] (wrap (str/join op vs)))
+(defn wrapper [op v] (str op (wrap v)))
+(defn ternary [k op v1 sep v2] (wrap (str/join " " [k op v1 sep v2])))
+
+(defn format-keyword [x] (cond->> (->snake_case_string (name x))
+                           (namespace x) (str (->snake_case_string (namespace x)) ".")))
+
+(defn format-keyword-quoted [x] (cond->> (->snake_case_string (name x))
+                                  (namespace x) (str (sql-quote (->snake_case_string (namespace x))) ".")))
+
+(defn format-alias [x]
+  (sql-quote
+   (if (keyword? x)
+     (if (namespace x)
+       (str/join "/" ((juxt namespace name) x))
+       (name x))
+     x)))
+
+(defn format-field
+  ([field]
+   (cond
+     (keyword? field) (format-keyword-quoted field)
+     (list? field) (wrapper (str/upper-case (str (first field))) (format-field (second field)))
+     (vector? field) (apply format-field field)
+     :else field))
+  ([field alias]
+   (infix (format-field field) "AS" (format-alias alias))))
+
+(defn format-value [x]
+  (cond
+    (nil? x) "NULL"
+    (boolean? x) x
+    (keyword? x) (format-keyword-quoted x)
+    :else "?"))
+
+;; Predicates
+
+(defn pred-= [k v]
+  (if (or (nil? v) (= "NULL" v) (boolean? v))
+    (infix k "IS" v)
+    (infix k "=" v)))
+
+(defn pred-not= [k v]
+  (if (or (nil? v) (= "NULL" v) (boolean? v))
+    (infix k "IS NOT" v)
+    (infix k "<>" v)))
+
+(defn pred-in [k & v]     (infix k "IN" (group ", " v)))
+(defn pred-not-in [k & v] (infix k "NOT IN" (group ", " v)))
+(defn pred-> [k v]        (infix k ">" v))
+(defn pred-< [k v]        (infix k "<" v))
+(defn pred->= [k v]       (infix k ">=" v))
+(defn pred-<= [k v]       (infix k "<=" v))
+(defn pred-and [& args]   (group " AND " args))
+(defn pred-or [& args]    (group " OR " args))
+(defn pred-not [v]        (wrapper "NOT" v))
+(defn pred-like [k v]     (infix k "LIKE" v))
+(defn pred-ilike [k v]    (infix k "ILIKE" v))
+(defn pred-exists [v]     (wrapper "EXISTS" v))
+(defn pred-between [k v1 v2] (ternary k "BETWEEN" v1 "AND" v2))
+
+(def predicates
+  (let [predicates-s {'like    pred-like
+                      'ilike   pred-ilike
+                      'and     pred-and
+                      'or      pred-or
+                      'not     pred-not
+                      'in      pred-in
+                      'exists  pred-exists
+                      'not-in  pred-not-in
+                      'between pred-between
+                      '>       pred->
+                      '<       pred-<
+                      '>=      pred->=
+                      '<=      pred-<=
+                      'not=    pred-not=
+                      '=       pred-=}
+        predicates-k (into {} (map (fn [[k v]] {(keyword k) v}) predicates-s))]
+    (merge predicates-s predicates-k)))
+
+;; Clause
+
+(defn- convert-clause-map [[k v]]
+  (if (and (fn? k) (map? v))
+    (apply k (map convert-clause-map v))
+    (if (coll? v)
+      (if (fn? (first v))
+        (apply (first v) (format-field k) (map format-value (rest v)))
+        (apply pred-in (format-field k) (map format-value v)))
+      (pred-= (format-field k) (format-value v)))))
+
+(defn format-clause [clause]
+  (->> clause
+       (walk/postwalk-replace predicates)
+       (map convert-clause-map)
+       (apply pred-and)))
+
+;; Source and target
+
+(defn format-source
+  ([source]
+   (cond
+     (keyword? source) (format-source source source)
+     (vector? source) (apply format-source source)
+     :else source))
+  ([source alias]
+   (infix
+    (if (keyword? source) (format-keyword source) (wrap source))
+    "AS" (sql-quote (format-keyword alias))))
+  ([left op right clause]
+   (let [op (str/upper-case (str/replace (name op) "-" " "))]
+     (ternary (format-source left) op (format-source right) "ON" (format-clause clause)))))
+
+(defn format-target [target] (format-keyword target))
+
+;; Order
+
+(defn format-order
+  ([order]
+   (cond
+     (vector? order) (apply format-order order)
+     (map? order) (->> order (map (fn [[k v]] (str (format-field k) " " (name v)))) (str/join ", "))
+     (keyword? order) (format-field order)
+     :else order))
+  ([order & more]
+   (str/join ", " (apply vector (format-order order) (map format-order more)))))
+
+;; Values
+
+(defn- extract-value [[_ v]]
+  (cond
+    (map? v) (map extract-value v)
+    (and (coll? v) (keyword? (first v))) (rest v)
+    :else v))
+
+(defn extract-values [clause]
+  (cond
+    (map? clause) (->> clause
+                       (map extract-value)
+                       flatten
+                       (filter some?)
+                       (filter (complement boolean?))
+                       (filter (complement keyword?))
+                       (into []))
+    (vector? clause) (->> clause (map extract-values) flatten (into []))
+    :else []))
