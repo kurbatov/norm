@@ -2,8 +2,15 @@
   (:refer-clojure :exclude [find update remove])
   (:require [clojure.string :refer [split]]))
 
+(defprotocol Command
+  "A command to an abstract storage."
+  :extend-via-metadata true
+  (execute [command] "Executes the `command` returning an execution result.")
+  (then ^Command [command next-command] "Combines two commands for execution in a transaction."))
+
 (defprotocol Query
   "A query to an abstract storage."
+  :extend-via-metadata true
   (join ^Query [query op source clause] "Adds `source` to the query linking it with specified `op`eration.")
   (where ^Query [query clauses] "Adds clauses to the query.")
   (order ^Query [query order] "Adds or replaces the order of records of the query result.")
@@ -12,15 +19,12 @@
   (fetch [query] [query fields] "Fetches the data that comply to the query.")
   (fetch-count [query] "Fetches the amount of records for the given query."))
 
-(defprotocol Command
-  "A command to an abstract storage."
-  (execute [command]))
-
 (defprotocol Entity
   "A persistent entity."
+  :extend-via-metadata true
   (create ^Command [entity data] "Builds a command that creates a new instance of the entity in the storage when executed.")
   (fetch-by-id ^Instance [entity id] "Fetches an instance of the entity with specified id from the storage.")
-  (find [entity] [entity where] "Builds a query that provides instances of the entity when fetched.")
+  (find ^Query [entity] ^Query [entity where] "Builds a query that provides instances of the entity when fetched.")
   (find-related ^Query [entity relation where] "Builds a query that provides instances of the related entity when fetched.")
   (update ^Command [entity where patch] "Builds a command that updates state of entities in the storage when executed.")
   (delete ^Command [entity where] "Builds a command that deletes entities from the storage when executed.")

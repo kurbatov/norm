@@ -5,52 +5,14 @@
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]
             [camel-snake-kebab.core :refer [->kebab-case-keyword]]
-            [norm.core :as core :refer [Query Command Entity where fetch find create-repository]]
+            [norm.core :as core :refer [where fetch find create-repository]]
             [norm.sql-format :as f]
-            [norm.jdbc :refer [as-entity-maps]]))
-
-;; Query builder
+            [norm.jdbc :refer [as-entity-maps]])
+  (:import [norm.core Command Query]))
 
 (def default-jdbc-opts
   {:return-keys true
    :builder-fn rs/as-unqualified-lower-maps})
-
-(defrecord SQLQuery [db source fields where order offset limit jdbc-opts]
-  Query
-  (join [this op r-source clause] (SQLQuery. db [source op r-source clause] fields where order offset limit jdbc-opts))
-  (where [this clauses] (SQLQuery. db source fields (merge where clauses) order offset limit jdbc-opts))
-  (order [this order] (SQLQuery. db source fields where order offset limit jdbc-opts))
-  (skip [this amount] (SQLQuery. db source fields where order amount limit jdbc-opts))
-  (limit [this amount] (SQLQuery. db source fields where order offset amount jdbc-opts))
-  (fetch [this]
-    (let [values (cond-> (f/extract-values where)
-                   limit (conj limit)
-                   offset (conj offset))
-          query (apply vector (str this) values)]
-      (jdbc/execute! db query (merge default-jdbc-opts jdbc-opts))))
-  (fetch [this fields] (fetch (SQLQuery. db source fields where order offset limit jdbc-opts)))
-  (fetch-count [this] (-> (SQLQuery. db source [['(count :*) :count]] where nil nil nil jdbc-opts) fetch first :count))
-  Object
-  (toString [this]
-    (cond->
-     (str
-      "SELECT " (->> (or fields [:*]) (map #(if (or (vector? %) (= :* %)) % [% %])) (map f/format-field) (str/join ", "))
-      " FROM " (f/format-source source))
-      where (str " WHERE " (f/format-clause where))
-      order (str " ORDER BY " (f/format-order order))
-      limit (str " LIMIT ?")
-      offset (str " OFFSET ?"))))
-
-(defn select
-  "Constructs a query."
-  ^SQLQuery
-  ([db source] (select db source nil))
-  ([db source fields] (select db source fields nil))
-  ([db source fields where] (select db source fields where nil))
-  ([db source fields where order] (select db source fields where order nil))
-  ([db source fields where order offset] (select db source fields where order offset nil))
-  ([db source fields where order offset limit] (select db source fields where order offset limit nil))
-  ([db source fields where order offset limit jdbc-opts] (->SQLQuery db source fields where order offset limit jdbc-opts)))
 
 (defmulti generate-sql-command
   "Generates SQL command depending on its type."
@@ -75,38 +37,107 @@
   (str "DELETE FROM " (f/format-target target)
        (when where (str " WHERE " (f/format-clause where)))))
 
-(defrecord SQLCommand [type db target values where]
-  Command
-  (execute [this]
-    (let [params (if (vector? values) (flatten (rest values)) (and values (f/extract-values values)))
-          params (if where (concat params (f/extract-values where)) params)
-          command (if params (apply vector (str this) params) [(str this)])]
-      (jdbc/execute-one! db command (when (= :insert type) default-jdbc-opts))))
-  Object
-  (toString [this] (generate-sql-command this)))
+(defn execute-sql-command [command]
+  (let [{:keys [type values where]} command
+        db (:db (meta command))
+        params (if (vector? values) (flatten (rest values)) (and values (f/extract-values values)))
+        params (if where (concat params (f/extract-values where)) params)
+        command (if params (apply vector (generate-sql-command command) params) [(generate-sql-command command)])]
+    (jdbc/execute-one! db command (when (= :insert type) default-jdbc-opts))))
+
+(declare sql-command-meta)
+
+(defn transaction
+  "Constructs a chain of commands that will be executed in a transaction."
+  ^Command
+  [db & commands]
+  (if (sequential? (first commands))
+    (-> (first commands)
+        (concat (rest commands))
+        (->> (mapv identity))
+        (with-meta (merge sql-command-meta {:db db})))
+    (with-meta commands (merge sql-command-meta {:db db}))))
+
+(def sql-command-meta
+  {`core/execute (fn execute-command [command]
+                   (let [db (:db (meta command))]
+                     (if (sequential? command)
+                       (jdbc/with-transaction [tx db]
+                         (->> command
+                              (map #(vary-meta % assoc :db tx))
+                              (mapv core/execute)))
+                       (execute-sql-command command))))
+   `core/then (fn then [command next-command]
+                (transaction (:db (meta command)) command next-command))})
 
 (defn insert
   "Constructs an insert command."
-  ^SQLCommand
+  ^Command
   [db target values]
-  (->SQLCommand :insert db target values nil))
+  (-> {:type :insert :target target :values values}
+      (with-meta (merge sql-command-meta {:db db}))))
 
 (defn update
   "Constructs an update command."
-  ^SQLCommand
+  ^Command
   [db target values where]
-  (->SQLCommand :update db target values where))
+  (-> {:type :update :target target :values values :where where}
+      (with-meta (merge sql-command-meta {:db db}))))
 
 (defn delete
   "Constructs a delete command."
-  ^SQLCommand
+  ^Command
   [db target where]
-  (->SQLCommand :delete db target nil where))
+  (-> {:type :delete :target target :where where}
+      (with-meta (merge sql-command-meta {:db db}))))
+
+;; Query builder
+
+(defrecord SQLQuery [source fields where order offset limit jdbc-opts]
+  core/Query
+  (join [this op r-source clause] (SQLQuery. [source op r-source clause] fields where order offset limit jdbc-opts))
+  (where [this clauses] (-> (SQLQuery. source fields (merge where clauses) order offset limit jdbc-opts) (with-meta (meta this))))
+  (order [this order] (-> (SQLQuery. source fields where order offset limit jdbc-opts) (with-meta (meta this))))
+  (skip [this amount] (-> (SQLQuery. source fields where order amount limit jdbc-opts) (with-meta (meta this))))
+  (limit [this amount] (-> (SQLQuery. source fields where order offset amount jdbc-opts) (with-meta (meta this))))
+  (fetch [this]
+    (let [values (cond-> (f/extract-values where)
+                   limit (conj limit)
+                   offset (conj offset))
+          query (apply vector (str this) values)
+          db (:db (meta this))]
+      (jdbc/execute! db query (merge default-jdbc-opts jdbc-opts))))
+  (fetch [this fields] (fetch (-> (SQLQuery. source fields where order offset limit jdbc-opts) (with-meta (meta this)))))
+  (fetch-count [this] (-> (SQLQuery. source [['(count :*) :count]] where nil nil nil jdbc-opts) (with-meta (meta this)) fetch first :count))
+  core/Command
+  (execute [this] (fetch this))
+  (then [this next-command] (transaction (:db (meta this)) this next-command))
+  Object
+  (toString [this]
+    (cond->
+     (str
+      "SELECT " (->> (or fields [:*]) (map #(if (or (vector? %) (= :* %)) % [% %])) (map f/format-field) (str/join ", "))
+      " FROM " (f/format-source source))
+      where (str " WHERE " (f/format-clause where))
+      order (str " ORDER BY " (f/format-order order))
+      limit (str " LIMIT ?")
+      offset (str " OFFSET ?"))))
+
+(defn select
+  "Constructs a query."
+  ^SQLQuery
+  ([db source] (select db source nil))
+  ([db source fields] (select db source fields nil))
+  ([db source fields where] (select db source fields where nil))
+  ([db source fields where order] (select db source fields where order nil))
+  ([db source fields where order offset] (select db source fields where order offset nil))
+  ([db source fields where order offset limit] (select db source fields where order offset limit nil))
+  ([db source fields where order offset limit jdbc-opts] (-> (->SQLQuery source fields where order offset limit jdbc-opts) (with-meta {:db db}))))
 
 ;; Relational entity
 
 (defrecord RelationalEntity [db table name pk fields relations]
-  Entity
+  core/Entity
   (create [this data] (insert db table data))
   (fetch-by-id [this id] (-> (find this {(or pk :id) id}) fetch first))
   (find [this] (find this nil))
@@ -178,7 +209,8 @@
                             {:table-schema [:ilike "public"]
                              :table-name   [:ilike (f/format-keyword (:table entity))]})
                     fetch
-                    (mapv (comp ->kebab-case-keyword :column-name)))]
+                    (mapv (comp ->kebab-case-keyword :column-name)))
+        fields (if (empty? fields) (:fields entity fields) fields)]
     (-> entity
         (assoc :name name)
         (assoc :pk (:pk entity :id))

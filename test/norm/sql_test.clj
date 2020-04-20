@@ -61,20 +61,21 @@
 
 (deftest sql-command-test
   (testing "Insert command building"
-    (is (= "INSERT INTO users (login, role) VALUES (?, ?)" (str (sql/insert nil :users {:login "admin" :role "admin"}))))
+    (is (= "INSERT INTO users (login, role) VALUES (?, ?)" (sql/generate-sql-command (sql/insert nil :users {:login "admin" :role "admin"}))))
     (is
      (= "INSERT INTO users (login, role) VALUES (?, ?), (?, ?), (?, ?)"
-        (str (sql/insert nil :users [[:login :role]
-                                     ["admin" "admin"]
-                                     ["foo" "user"]
-                                     ["bar" "user"]])))))
+        (-> (sql/insert nil :users [[:login :role]
+                                    ["admin" "admin"]
+                                    ["foo" "user"]
+                                    ["bar" "user"]])
+            sql/generate-sql-command))))
   (testing "Update command building"
-    (is (= "UPDATE users SET login = ?, role = ? WHERE (id = ?)" (str (sql/update nil :users {:login "admin", :role "admin"} {:id 1})))))
+    (is (= "UPDATE users SET login = ?, role = ? WHERE (id = ?)" (sql/generate-sql-command (sql/update nil :users {:login "admin", :role "admin"} {:id 1})))))
   (testing "Delete command building"
-    (is (= "DELETE FROM users WHERE (id = ?)" (str (sql/delete nil :users {:id 1})))))
+    (is (= "DELETE FROM users WHERE (id = ?)" (sql/generate-sql-command (sql/delete nil :users {:id 1})))))
   (testing "Execution"
     (with-open [conn (jdbc/get-connection {:dbtype "h2:mem"})]
-      (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL, name VARCHAR(100), gender VARCHAR(10), birthday DATE)"])
+      (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL, name VARCHAR(100) NOT NULL, gender VARCHAR(10), birthday DATE)"])
       (testing "of insert"
         (is (= {:id 1} (-> (sql/insert conn :people {:name "John Doe"}) norm/execute)))
         (is (= {:id 2} (-> (sql/insert conn :people [[:name :gender] ["Jane Doe" "female"] ["Zoe Doe" "female"]]) norm/execute)))
@@ -84,7 +85,36 @@
         (is (= [{:id 1 :gender "male"}] (-> (sql/select conn :people [:id :gender] {:id 1}) fetch)) "Row must change after update."))
       (testing "of delete"
         (is (= {:next.jdbc/update-count 1} (-> (sql/delete conn :people {:id 1}) norm/execute)))
-        (is (= [{:id 2} {:id 3}] (-> (sql/select conn :people [:id]) fetch)) "Deleted row must be missing from the table.")))))
+        (is (= [{:id 2} {:id 3}] (-> (sql/select conn :people [:id]) fetch)) "Deleted row must be missing from the table."))
+      (testing "of transaction"
+        (is (= [{:id 4} {:id 5} {:id 6} {:id 7} [{:id 4 :name "Buzz Lightyear"}]]
+               (-> (sql/transaction conn
+                                    (sql/insert nil :people {:name "Buzz Lightyear"})
+                                    (sql/insert nil :people {:name "Woody"})
+                                    (sql/insert nil :people {:name "Jessie"})
+                                    (sql/insert nil :people {:name "Sid"})
+                                    (sql/select nil :people [:id :name] {:name "Buzz Lightyear"}))
+                   norm/execute)))
+        (is (= [{:id 4 :name "Buzz Lightyear"}
+                {:id 5 :name "Woody"}
+                {:id 6 :name "Jessie"}
+                {:id 7 :name "Sid"}]
+               (-> (sql/select conn :people [:id :name] {:id [:> 3]}) norm/execute)))
+        (is (= (repeat 4 {:next.jdbc/update-count 1})
+               (-> (sql/delete conn :people {:id 4})
+                   (norm/then (sql/delete conn :people {:id 5}))
+                   (norm/then (sql/delete conn :people {:id 6}))
+                   (norm/then (sql/delete conn :people {:id 7}))
+                   norm/execute)))
+        (is (thrown? org.h2.jdbc.JdbcSQLSyntaxErrorException
+                     (-> (sql/transaction conn
+                                          (sql/delete nil :people {:name "Jane Doe"})
+                                          (sql/insert nil :people {:first-name "John" :last-name "Doe"})
+                                          (sql/select nil :people [:id :name] {:name "John Doe"}))
+                         norm/execute)))
+        (is (= [{:id 2 :name "Jane Doe"}]
+               (-> (sql/select conn :people [:id :name] {:name "Jane Doe"}) norm/execute))
+            "Record must be present after failed transaction")))))
 
 (deftest relational-entity-test
   (with-open [conn (jdbc/get-connection {:dbtype "h2:mem"})]
