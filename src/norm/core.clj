@@ -28,8 +28,35 @@
   (find-related ^Query [entity relation where] "Builds a query that provides instances of the related entity when fetched.")
   (update ^Command [entity where patch] "Builds a command that updates state of entities in the storage when executed.")
   (delete ^Command [entity where] "Builds a command that deletes entities from the storage when executed.")
-  (with-relations ^Entity [entity relations] "Creates a new entity based on the specified one amending relations.")
-  (with-eager ^Entity [entity rel-keys] "Makes specified relations to be fetched eagerly."))
+  (with-filter ^Entity [entity where]
+    "Creates a new entity based on the specified one applying the filter.
+
+    Example:
+
+    ```
+    (def active-user (with-filter user {:active true}))
+    ```")
+  (with-relations ^Entity [entity relations]
+    "Creates a new entity based on the specified one amending relations.
+
+    Example:
+
+    ```
+    (def user-with-personal-data
+      (with-relations user
+                      {:person {:entity :person
+                                :type :has-one
+                                :fk :user-id
+                                :eager true}}))
+    ```")
+  (with-eager ^Entity [entity rel-keys]
+    "Makes specified relations to be fetched eagerly.
+
+    Example:
+
+    ```
+    (def user-with-personal-data (with-eager user [:person]))
+    ```"))
 
 (defprotocol Instance
   "An instance of a persistent entity."

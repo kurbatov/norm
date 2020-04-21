@@ -1,7 +1,6 @@
 (ns norm.sql
   (:refer-clojure :exclude [find update remove select])
   (:require [clojure.string :as str]
-            [clojure.walk :as walk]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]
             [camel-snake-kebab.core :refer [->kebab-case-keyword]]
@@ -96,7 +95,10 @@
 (defrecord SQLQuery [source fields where order offset limit jdbc-opts]
   core/Query
   (join [this op r-source clause] (SQLQuery. [source op r-source clause] fields where order offset limit jdbc-opts))
-  (where [this clauses] (-> (SQLQuery. source fields (merge where clauses) order offset limit jdbc-opts) (with-meta (meta this))))
+  (where [this clauses]
+         (->
+          (SQLQuery. source fields (if (and where clauses) (list 'and where clauses) (or where clauses)) order offset limit jdbc-opts)
+          (with-meta (meta this))))
   (order [this order] (-> (SQLQuery. source fields where order offset limit jdbc-opts) (with-meta (meta this))))
   (skip [this amount] (-> (SQLQuery. source fields where order amount limit jdbc-opts) (with-meta (meta this))))
   (limit [this amount] (-> (SQLQuery. source fields where order offset amount jdbc-opts) (with-meta (meta this))))
@@ -165,34 +167,37 @@
                              [left-src :left-join [(:table entity) alias] clause]))
                          source
                          eager)
-          where (walk/postwalk
-                 #(if (and (keyword? %) (not (f/prefixed? name %)))
-                    (f/prefix name %)
-                    %)
-                 where)]
+          where (f/ensure-prefixed name where)
+          filter (f/ensure-prefixed name (:filter this))
+          where (if (and filter where) (list 'and filter where) (or filter where))]
       (select db source fields where nil nil nil {:builder-fn as-entity-maps :entity this})))
   (find-related [this relation-key where]
     (let [repository @(:repository (meta this) (delay {}))
           relation (relation-key relations)
-          entity (-> ((:entity relation) repository) (assoc :name relation-key))
+          alias (f/prefix name relation-key)
+          entity (-> ((:entity relation) repository) (assoc :name alias))
           base (core/find entity)
           {:keys [source fields]} base
           clause (condp = (:type relation)
-                   :has-one {(f/prefix name pk) (f/prefix relation-key (:fk relation))}
-                   :belongs-to {(f/prefix name (:fk relation)) (f/prefix relation-key (:pk entity))}
+                   :has-one {(f/prefix name pk) (f/prefix alias (:fk relation))}
+                   :belongs-to {(f/prefix name (:fk relation)) (f/prefix alias (:pk entity))}
                    :has-many (if (:join-table relation)
-                               {(f/prefix relation-key (:pk entity)) (f/prefix (:join-table relation) (:rfk relation))}
-                               {(f/prefix name pk) (f/prefix relation-key (:fk relation))}))
+                               {(f/prefix alias (:pk entity)) (f/prefix (:join-table relation) (:rfk relation))}
+                               {(f/prefix name pk) (f/prefix alias (:fk relation))}))
           r-source (if (:join-table relation)
                      [[table name] :left-join (:join-table relation) {(f/prefix name pk) (f/prefix (:join-table relation) (:fk relation))}]
                      [table name])
           source [source :right-join r-source clause]
-          where (walk/postwalk
-                 #(if (and (keyword? %) (not (namespace %))) (f/prefix name %) %)
-                 where)]
+          where (f/ensure-prefixed name where)
+          where (if (and (:where base) where) (list 'and (:where base) where) (or (:where base) where))
+          filter (f/ensure-prefixed name (:filter this))
+          r-filter (f/ensure-prefixed alias (:filter relation))
+          filter (if (and filter r-filter) (list 'and filter r-filter) (or filter r-filter))
+          where (if (and filter where) (list 'and filter where) (or filter where))]
       (select db source fields where nil nil nil {:builder-fn as-entity-maps :entity entity})))
   (update [this where patch] (update db table patch where))
   (delete [this where] (delete db table where))
+  (with-filter [this where] (assoc this :filter where))
   (with-relations [this new-relations]
     (-> (RelationalEntity. db table name pk fields (merge relations new-relations))
         (with-meta (meta this))))

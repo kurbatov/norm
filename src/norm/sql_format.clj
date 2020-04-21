@@ -18,6 +18,13 @@
    (or (namespace key) "")
    (str (when-let [n (namespace prefix)] (str n ".")) (name prefix))))
 
+(defn ensure-prefixed [pfix coll]
+  (walk/postwalk
+   #(if (and (keyword? %) (not (prefixed? pfix %)))
+      (prefix pfix %)
+      %)
+   coll))
+
 (defn sql-quote [x] (str \" x \"))
 (defn wrap [x] (str "(" x ")"))
 (defn infix [k op v] (str/join " " [k op v]))
@@ -32,12 +39,11 @@
                                   (namespace x) (str (sql-quote (->snake_case_string (namespace x))) ".")))
 
 (defn format-alias [x]
-  (sql-quote
-   (if (keyword? x)
-     (if (namespace x)
-       (str/join "/" ((juxt namespace name) x))
-       (name x))
-     x)))
+  (if (keyword? x)
+    (if (namespace x)
+      (str/join "/" ((juxt namespace name) x))
+      (name x))
+    x))
 
 (defn format-field
   ([field]
@@ -47,7 +53,7 @@
      (vector? field) (apply format-field field)
      :else field))
   ([field alias]
-   (infix (format-field field) "AS" (format-alias alias))))
+   (infix (format-field field) "AS" (sql-quote (format-alias alias)))))
 
 (defn format-value [x]
   (cond
@@ -103,20 +109,32 @@
 
 ;; Clause
 
-(defn- convert-clause-map [[k v]]
+(defn- convert-clause-map-entry [[k v]]
   (if (and (fn? k) (map? v))
-    (apply k (map convert-clause-map v))
+    (apply k (map convert-clause-map-entry v))
     (if (coll? v)
       (if (fn? (first v))
         (apply (first v) (format-field k) (map format-value (rest v)))
         (apply pred-in (format-field k) (map format-value v)))
       (pred-= (format-field k) (format-value v)))))
 
+(defn- convert-clause-map [x]
+  (if (map? x)
+    (->> x
+         (map convert-clause-map-entry)
+         (apply pred-and))
+    x))
+
+(defn- convert-clause-list [x]
+  (if (and (list? x) (fn? (first x)))
+    (apply (first x) (rest x))
+    x))
+
 (defn format-clause [clause]
   (->> clause
        (walk/postwalk-replace predicates)
-       (map convert-clause-map)
-       (apply pred-and)))
+       (walk/prewalk convert-clause-map)
+       (walk/postwalk convert-clause-list)))
 
 ;; Source and target
 
@@ -165,5 +183,6 @@
                        (filter (complement boolean?))
                        (filter (complement keyword?))
                        (into []))
-    (vector? clause) (->> clause (map extract-values) flatten (into []))
+    (or (vector? clause)
+        (list? clause)) (->> clause (map extract-values) flatten (into []))
     :else []))

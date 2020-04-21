@@ -19,6 +19,11 @@
   (is (not (f/prefixed? :user :person/name)))
   (is (not (f/prefixed? :user/person :person/name))))
 
+(deftest ensure-prefixed-test
+  (is (= {:user/id 1 :user/login "user"} (f/ensure-prefixed :user {:id 1 :login "user"})))
+  (is (= {:user/id 1 :user.person/name "user"} (f/ensure-prefixed :user {:id 1 :person/name "user"})))
+  (is (= {:user/id 1 :user/login "user"} (f/ensure-prefixed :user {:user/id 1 :user/login "user"}))))
+
 (deftest format-value-test
   (is (= "NULL" (f/format-value nil)))
   (is (= "id" (f/format-value :id)))
@@ -27,11 +32,11 @@
   (is (= "?" (f/format-value "string"))))
 
 (deftest format-alias-test
-  (is (= "\"id\"" (f/format-alias :id)) "Alias gets quoted.")
-  (is (= "\"person/id\"" (f/format-alias :person/id)) "Namespace separated with a slash.")
-  (is (= "\"user.person/id\"" (f/format-alias :user.person/id)) "Complex namespace separated with a slash.")
-  (is (= "\"id\"" (f/format-alias "id")) "Accept string alliases.")
-  (is (= "\"person.id\"" (f/format-alias "person.id")) "String aliases stay as is."))
+  (is (= "id" (f/format-alias :id)) "Alias unquoted.")
+  (is (= "person/id" (f/format-alias :person/id)) "Namespace separated with a slash.")
+  (is (= "user.person/id" (f/format-alias :user.person/id)) "Complex namespace separated with a slash.")
+  (is (= "id" (f/format-alias "id")) "Accept string alliases.")
+  (is (= "person.id" (f/format-alias "person.id")) "String aliases stay as is."))
 
 (deftest format-field-test
   (is (= "id" (f/format-field :id)) "Plain field doesn't get quoted.")
@@ -58,7 +63,8 @@
   (is (= "(name NOT IN (?, ?, ?))" (f/format-clause {:name [:not-in "John" "Sam" "Jack"]})))
   (is (= "(name ILIKE ?)" (f/format-clause {:name [:ilike "John%"]})))
   (is (= "((birthday BETWEEN ? AND ?))" (f/format-clause {:birthday [:between "1988-01-01" "1988-02-01"]})))
-  (is (= "((id = ? OR name = ?) AND role = ?)" (f/format-clause {:or {:id 1 :name "John"} :role "admin"}))))
+  (is (= "((id = ? OR name = ?) AND role = ?)" (f/format-clause {:or {:id 1 :name "John"} :role "admin"})))
+  (is (= "(((id = ? OR name = ?)) AND (role = ?))" (f/format-clause '(and {:or {:id 1 :name "John"}} {:role "admin"})))))
 
 (deftest format-source-test
   (testing "Simple case"
@@ -111,7 +117,8 @@
       (is (= [1 "John%"] (f/extract-values {:id 1 :name [:like "John%"]})))
       (is (= ["John%" "1980-01-01" "1990-01-01"] (f/extract-values {:name [:like "John%"] :birthday [:between "1980-01-01" "1990-01-01"]})))
       (is (= ["John" "Jane" "Boris" "1980-01-01" "1990-01-01"] (f/extract-values {:name ["John" "Jane" "Boris"] :birthday [:between "1980-01-01" "1990-01-01"]})))
-      (is (= ["John" "Jane" "Boris" "1980-01-01" "1990-01-01" "admin"] (f/extract-values {:or {:name ["John" "Jane" "Boris"] :birthday [:between "1980-01-01" "1990-01-01"]} :active true :role "admin"}))))
+      (is (= ["John" "Jane" "Boris" "1980-01-01" "1990-01-01" "admin"] (f/extract-values {:or {:name ["John" "Jane" "Boris"] :birthday [:between "1980-01-01" "1990-01-01"]} :active true :role "admin"})))
+      (is (= ["John" "Jane" "Boris" "1980-01-01" "1990-01-01" "admin"] (f/extract-values '(and {:or {:name ["John" "Jane" "Boris"] :birthday [:between "1980-01-01" "1990-01-01"]}} {:active true :role "admin"})))))
     (testing "from target"
       (is (= [] (f/extract-values :users)))
       (is (= [] (f/extract-values [:users :user])))

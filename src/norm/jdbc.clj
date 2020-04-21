@@ -2,7 +2,8 @@
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
             [next.jdbc.result-set :refer [RowBuilder ResultSetBuilder read-column-by-index]]
-            [norm.core :refer [instance-meta]])
+            [norm.core :refer [instance-meta]]
+            [norm.sql-format :refer [format-alias]])
   (:import [java.sql ResultSet ResultSetMetaData]
            [java.util Locale]))
 
@@ -56,11 +57,14 @@
   The column name vector determines nesting of the value from
   the result set in a row that `RowBuilder` makes."
   [^ResultSetMetaData rsmeta exclude]
-  (->> (range 1 (inc (.getColumnCount rsmeta)))
-       (map (fn [^Integer i] (.toLowerCase (.getColumnLabel rsmeta i) (Locale/US))))
-       (map #(str/split % #"[\./]"))
-       (map #(if (= exclude (first %)) (rest %) %))
-       (mapv (partial mapv keyword))))
+  (let [sep #"[\./]"
+        exclude (str/split exclude sep)
+        e-count (count exclude)]
+    (->> (range 1 (inc (.getColumnCount rsmeta)))
+         (map (fn [^Integer i] (.toLowerCase (.getColumnLabel rsmeta i) (Locale/US))))
+         (map #(str/split % sep))
+         (map #(if (= exclude (subvec % 0 e-count)) (subvec % e-count) %))
+         (mapv (partial mapv keyword)))))
 
 (defn as-entity-maps
   "Given a `ResultSet` and options, return a `RowBuilder` / `ResultSetBuilder`
@@ -69,5 +73,5 @@
   [^ResultSet rs opts]
   (let [{:keys [entity]} opts
         rsmeta (.getMetaData rs)
-        cols   (get-column-names rsmeta (name (:name entity)))]
+        cols   (get-column-names rsmeta (format-alias (:name entity)))]
     (->EntityResultSetBuilder rs rsmeta cols entity)))

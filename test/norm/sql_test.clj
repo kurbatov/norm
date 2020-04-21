@@ -14,6 +14,11 @@
            (str (sql/select nil [:users :user] [:user/id :user/name]))))
     (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" WHERE (id = ?)"
            (str (sql/select nil :users [:id :name] {:id 1}))))
+    (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" WHERE (((id = ?) AND (name = ?)) AND (role = ?))"
+           (-> (sql/select nil :users [:id :name] {:id 1})
+               (where {:name "John Doe"})
+               (where {:role "admin"})
+               str)))
     (is (= "SELECT column_name AS \"column-name\" FROM information_schema.columns AS \"information_schema.columns\" WHERE (table_schema ILIKE ? AND table_name ILIKE ?)"
            (-> (sql/select nil
                            :information-schema/columns
@@ -119,9 +124,9 @@
 (deftest relational-entity-test
   (with-open [conn (jdbc/get-connection {:dbtype "h2:mem"})]
     (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL, name VARCHAR(100), gender VARCHAR(10), birthday DATE)"])
-    (jdbc/execute! conn ["CREATE TABLE users (id BIGINT, login VARCHAR(100), role VARCHAR(50))"])
+    (jdbc/execute! conn ["CREATE TABLE users (id BIGINT, login VARCHAR(100), role VARCHAR(50), active BOOLEAN)"])
     (let [person (sql/->RelationalEntity conn :people :person :id [:id :name :gender :birthday] {})
-          user (sql/->RelationalEntity conn :users :user :id [:id :login :role] {})]
+          user (sql/->RelationalEntity conn :users :user :id [:id :login :role :active] {})]
       (testing "creation"
         (is (= {:id 1} (-> (norm/create person {:name "John Doe" :gender "male"}) norm/execute)))
         (is (= {:id 2} (-> (norm/create person {:name "Jane Doe" :gender "female"}) norm/execute)))
@@ -148,7 +153,28 @@
         (is (= {:id 2 :name "Jane Love" :gender "female"} (norm/fetch-by-id person 2)) "Entity must change after update."))
       (testing "delete"
         (is (= {:next.jdbc/update-count 1} (-> (norm/delete person {:id 2}) norm/execute)))
-        (is (nil? (norm/fetch-by-id person 2)) "Entity must be missing after delete.")))))
+        (is (nil? (norm/fetch-by-id person 2)) "Entity must be missing after delete."))
+      (testing "with filter"
+        (is (= (merge user {:filter {:active true}})
+               (norm/with-filter user {:active true})))
+        (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\", \"user\".role AS \"user/role\", \"user\".active AS \"user/active\" FROM users AS \"user\" WHERE (\"user\".active IS true)"
+               (-> (norm/with-filter user {:active true}) norm/find str)))
+        (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\", \"user\".role AS \"user/role\", \"user\".active AS \"user/active\" FROM users AS \"user\" WHERE ((\"user\".active IS true) AND (\"user\".id = ?))"
+               (-> (norm/with-filter user {:active true}) (norm/find {:id 1}) str))))
+      (testing "mutating an entity"
+        (is (= (merge user {:relations {:secret {:entity :secret
+                                                 :type :has-one
+                                                 :fk :user-id}}})
+               (norm/with-relations user {:secret {:entity :secret
+                                                   :type :has-one
+                                                   :fk :user-id}})))
+        (is (= true
+               (-> user
+                   (norm/with-relations {:secret {:entity :secret
+                                                  :type :has-one
+                                                  :fk :user-id}})
+                   (norm/with-eager [:secret])
+                   (get-in [:relations :secret :eager]))))))))
 
 (def entities
   {:person {:table :people
@@ -180,39 +206,47 @@
                                    :fk :id
                                    :eager true}
                           :supervisor {:entity :employee
-                                       :type :has-one
+                                       :type :belongs-to
                                        :fk :supervisor-id}
+                          :subordinates {:entity :employee
+                                         :type :has-many
+                                         :fk :supervisor-id
+                                         :filter {:active true}}
                           :responsibilities {:entity :responsibility
                                              :type :has-many
                                              :fk :employee-id
                                              :rfk :responsibility-id
-                                             :join-table :employees-responsibilities}
+                                             :join-table :employees-responsibilities
+                                             :filter {:active true}}
                           :nonresponsibilities {:entity :responsibility
                                                 :type :has-many
                                                 :fk :employee-id
                                                 :rfk :responsibility-id
-                                                :join-table :employees-responsibilities-negative}}}
+                                                :join-table :employees-responsibilities-negative
+                                                :filter {:active true}}}}
    :responsibility {:table :responsibilities
                     :pk :id
                     :relations {:employees {:entity :employee
                                             :type :has-many
                                             :fk :responsibility-id
                                             :rfk :employee-id
-                                            :join-table :employees-responsibilities}
+                                            :join-table :employees-responsibilities
+                                            :filter {:active true}}
                                 :nonemployees {:entity :employee
                                                :type :has-many
                                                :fk :responsibility-id
                                                :rfk :employee-id
-                                               :join-table :employees-responsibilities-negative}}}})
+                                               :join-table :employees-responsibilities-negative
+                                               :filter {:active true}}}}})
 
 (deftest create-repository-test
   (with-open [conn (jdbc/get-connection {:dbtype "h2:mem"})]
     (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL, name VARCHAR(100), gender VARCHAR(10), birthday DATE)"])
     (jdbc/execute! conn ["CREATE TABLE contacts (id BIGSERIAL, person_id BIGINT, type VARCHAR(32), value VARCHAR(128))"])
-    (jdbc/execute! conn ["CREATE TABLE users (id BIGINT, login VARCHAR(100), role VARCHAR(50))"])
+    (jdbc/execute! conn ["CREATE TABLE users (id BIGINT, login VARCHAR(100), role VARCHAR(50), active BOOLEAN DEFAULT true)"])
     (jdbc/execute! conn ["CREATE TABLE secrets (id BIGINT, secret VARCHAR(256))"])
-    (jdbc/execute! conn ["CREATE TABLE employees (id BIGSERIAL, supervisor_id BIGINT, salary NUMERIC(19, 4))"])
-    (jdbc/execute! conn ["CREATE TABLE responsibilities (id BIGSERIAL, title VARCHAR(128), description TEXT)"])
+    (jdbc/execute! conn ["CREATE TABLE employees (id BIGSERIAL, supervisor_id BIGINT, salary NUMERIC(19, 4), active BOOLEAN DEFAULT true)"])
+    (jdbc/execute! conn ["CREATE TABLE responsibilities (id BIGSERIAL, title VARCHAR(128), description TEXT, active BOOLEAN DEFAULT true)"])
     (jdbc/execute! conn ["CREATE TABLE employees_responsibilities (employee_id BIGINT, responsibility_id BIGINT)"])
     (jdbc/execute! conn ["CREATE VIEW employees_responsibilities_negative AS
 (SELECT e.id AS employee_id, r.id AS responsibility_id
@@ -222,30 +256,37 @@ ON er.responsibility_id = r.id AND er.employee_id = e.id
 WHERE er.employee_id IS NULL)"])
     (jdbc/execute! conn ["INSERT INTO people (name, gender) VALUES ('John Doe', 'male')"])
     (jdbc/execute! conn ["INSERT INTO people (name, gender) VALUES ('Jane Doe', 'female')"])
+    (jdbc/execute! conn ["INSERT INTO people (name, gender) VALUES ('Zoe Doe', 'female')"])
     (jdbc/execute! conn ["INSERT INTO contacts (person_id, type, value) VALUES (1, 'email', 'john.doe@mailinator.com')"])
     (jdbc/execute! conn ["INSERT INTO contacts (person_id, type, value) VALUES (1, 'phone', '+1(xxx)xxx-xx-xx')"])
     (jdbc/execute! conn ["INSERT INTO contacts (person_id, type, value) VALUES (2, 'email', 'jane.doe@mailinator.com')"])
     (jdbc/execute! conn ["INSERT INTO users (id, login) VALUES (1, 'john.doe')"])
+    (jdbc/execute! conn ["INSERT INTO users (id, login, active) VALUES (2, 'jane.doe', false)"])
+    (jdbc/execute! conn ["INSERT INTO users (id, login, active) VALUES (3, 'zoe.doe', true)"])
     (jdbc/execute! conn ["INSERT INTO secrets (id, secret) VALUES (1, 'sha256(xxxxxxx)')"])
     (jdbc/execute! conn ["INSERT INTO employees (id, salary) VALUES (1, 1500)"])
     (jdbc/execute! conn ["INSERT INTO employees (id, supervisor_id, salary) VALUES (2, 1, 3000)"])
+    (jdbc/execute! conn ["INSERT INTO employees (id, supervisor_id, salary, active) VALUES (3, 1, 3100, false)"])
     (jdbc/execute! conn ["INSERT INTO responsibilities (title) VALUES ('Cleaning')"])
     (jdbc/execute! conn ["INSERT INTO responsibilities (title) VALUES ('Watering plants')"])
     (jdbc/execute! conn ["INSERT INTO responsibilities (title) VALUES ('Gardening')"])
+    (jdbc/execute! conn ["INSERT INTO responsibilities (title, active) VALUES ('Deprecated activity', false)"])
     (jdbc/execute! conn ["INSERT INTO employees_responsibilities (employee_id, responsibility_id) VALUES (1, 1)"])
     (jdbc/execute! conn ["INSERT INTO employees_responsibilities (employee_id, responsibility_id) VALUES (1, 3)"])
     (jdbc/execute! conn ["INSERT INTO employees_responsibilities (employee_id, responsibility_id) VALUES (2, 2)"])
+    (jdbc/execute! conn ["INSERT INTO employees_responsibilities (employee_id, responsibility_id) VALUES (3, 2)"])
+    (jdbc/execute! conn ["INSERT INTO employees_responsibilities (employee_id, responsibility_id) VALUES (3, 4)"])
     (let [repository (norm/create-repository :sql entities {:db conn})]
       (is (instance? RelationalEntity (:person repository)))
       (is (= repository @(:repository (meta (:person repository)))) "Entity must have repository in metadata.")
       (testing "Fields populated."
         (is (= [:id :name :gender :birthday] (get-in repository [:person :fields])))
         (is (= [:id :person-id :type :value] (get-in repository [:contact :fields])))
-        (is (= [:id :login :role] (get-in repository [:user :fields]))))
+        (is (= [:id :login :role :active] (get-in repository [:user :fields]))))
       (testing "SQL generation"
-        (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\", \"user\".role AS \"user/role\", \"user.person\".id AS \"user.person/id\", \"user.person\".name AS \"user.person/name\", \"user.person\".gender AS \"user.person/gender\", \"user.person\".birthday AS \"user.person/birthday\" FROM (users AS \"user\" LEFT JOIN people AS \"user.person\" ON (\"user\".id = \"user.person\".id))"
+        (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\", \"user\".role AS \"user/role\", \"user\".active AS \"user/active\", \"user.person\".id AS \"user.person/id\", \"user.person\".name AS \"user.person/name\", \"user.person\".gender AS \"user.person/gender\", \"user.person\".birthday AS \"user.person/birthday\" FROM (users AS \"user\" LEFT JOIN people AS \"user.person\" ON (\"user\".id = \"user.person\".id))"
                (str (norm/find (:user repository)))))
-        (is (= "SELECT \"employee\".id AS \"employee/id\", \"employee\".supervisor_id AS \"employee/supervisor-id\", \"employee\".salary AS \"employee/salary\", \"employee.person\".id AS \"employee.person/id\", \"employee.person\".name AS \"employee.person/name\", \"employee.person\".gender AS \"employee.person/gender\", \"employee.person\".birthday AS \"employee.person/birthday\" FROM (employees AS \"employee\" LEFT JOIN people AS \"employee.person\" ON (\"employee\".id = \"employee.person\".id)) WHERE (\"employee.person\".name = ?)"
+        (is (= "SELECT \"employee\".id AS \"employee/id\", \"employee\".supervisor_id AS \"employee/supervisor-id\", \"employee\".salary AS \"employee/salary\", \"employee\".active AS \"employee/active\", \"employee.person\".id AS \"employee.person/id\", \"employee.person\".name AS \"employee.person/name\", \"employee.person\".gender AS \"employee.person/gender\", \"employee.person\".birthday AS \"employee.person/birthday\" FROM (employees AS \"employee\" LEFT JOIN people AS \"employee.person\" ON (\"employee\".id = \"employee.person\".id)) WHERE (\"employee.person\".name = ?)"
                (-> (norm/find (:employee repository) {:person/name "Jane Doe"}) str)
                (-> (norm/find (:employee repository) {:employee.person/name "Jane Doe"}) str)
                (-> (norm/find (:employee repository)) (where {:employee.person/name "Jane Doe"}) str))))
@@ -253,6 +294,7 @@ WHERE er.employee_id IS NULL)"])
         (let [instance (norm/fetch-by-id (:user repository) 1)]
           (is (= {:id 1
                   :login "john.doe"
+                  :active true
                   :person {:id 1
                            :name "John Doe"
                            :gender "male"}}
@@ -265,6 +307,7 @@ WHERE er.employee_id IS NULL)"])
         (is (= [{:id 2
                  :supervisor-id 1
                  :salary 3000.0000M
+                 :active true
                  :person {:id 2
                           :name "Jane Doe"
                           :gender "female"}}]
@@ -272,17 +315,32 @@ WHERE er.employee_id IS NULL)"])
                    (where {:employee.person/name "Jane Doe"})
                    fetch))
             "Clause by related entity's fields must work."))
+      (testing "filter by related entities"
+        #_(is (= [] (-> (norm/find (:user-secret repository) {:owner/login "john.doe"}) fetch))))
       (testing "fetching related entities"
         (is (= [{:id 1 :name "John Doe" :gender "male"}]
                (-> (norm/find-related (:user repository) :person {:id 1}) fetch)
                (-> (norm/find-related (:user repository) :person {:user/id 1}) fetch)
-               (-> (norm/find-related (:user repository) :person nil) (where {:user/id 1}) fetch)))
+               (-> (norm/find-related (:user repository) :person nil) (where {:user/id 1}) fetch)
+               (-> (norm/find-related (:user repository) :person {:person/name "John Doe"}) fetch)
+               (-> (norm/find-related (:user repository) :person {:user.person/name "John Doe"}) fetch)))
         (is (= [{:id 3 :person-id 2 :type "email" :value "jane.doe@mailinator.com" :owner {:id 2 :name "Jane Doe" :gender "female"}}]
                (-> (norm/find-related (:person repository) :contacts {:person/name "Jane Doe"}) fetch)))
-        (is (= [{:id 1, :title "Cleaning"} {:id 3, :title "Gardening"}]
+        (is (= [{:id 1, :title "Cleaning", :active true} {:id 3, :title "Gardening", :active true}]
                (-> (norm/find-related (:employee repository) :responsibilities {:id 1}) fetch)
                (-> (norm/find-related (:employee repository) :nonresponsibilities {:id 2}) fetch)))
-        (is (= [{:id 1 :salary 1500.0000M :person {:id 1 :name "John Doe" :gender "male"}}]
+        (is (= [{:id 1 :salary 1500.0000M :active true :person {:id 1 :name "John Doe" :gender "male"}}]
                (-> (norm/find-related (:responsibility repository) :employees {:id 1}) fetch)
                (-> (norm/find-related (:responsibility repository) :employees {:id 3}) fetch)
-               (-> (norm/find-related (:responsibility repository) :nonemployees {:id 2}) fetch)))))))
+               (-> (norm/find-related (:responsibility repository) :nonemployees {:id 2}) fetch)))
+        (is (= [{:id 2 :supervisor-id 1 :salary 3000.0000M :active true :person {:id 2 :name "Jane Doe" :gender "female"}}]
+               (-> (norm/find-related (:employee repository) :subordinates {:id 1}) fetch)))
+        (is (= [{:id 1 :salary 1500.0000M :active true :person {:id 1 :name "John Doe" :gender "male"}}]
+               (-> (norm/find-related (:employee repository) :supervisor {:id 2}) fetch))))
+      (testing "fetch with filter"
+        (is (= [{:id 1 :login "john.doe" :active true :person {:id 1, :name "John Doe", :gender "male"}}
+                {:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
+               (-> (:user repository) (norm/with-filter {:active true}) norm/find fetch)))
+        (is (= [{:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
+               (-> (:user repository) (norm/with-filter {:active true}) (norm/find {:person/gender "female"}) fetch)))
+        ))))
