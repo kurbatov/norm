@@ -6,7 +6,8 @@
             [camel-snake-kebab.core :refer [->kebab-case-keyword]]
             [norm.core :as core :refer [where fetch find create-repository]]
             [norm.sql-format :as f]
-            [norm.jdbc :refer [as-entity-maps]])
+            [norm.jdbc :refer [as-entity-maps]]
+            [norm.util :refer [flatten-map]])
   (:import [norm.core Command Query]))
 
 (def default-jdbc-opts
@@ -97,7 +98,7 @@
   (join [this op r-source clause] (SQLQuery. [source op r-source clause] fields where order offset limit jdbc-opts))
   (where [this clauses]
          (->
-          (SQLQuery. source fields (if (and where clauses) (list 'and where clauses) (or where clauses)) order offset limit jdbc-opts)
+          (SQLQuery. source fields (f/conjunct-clauses where clauses) order offset limit jdbc-opts)
           (with-meta (meta this))))
   (order [this order] (-> (SQLQuery. source fields where order offset limit jdbc-opts) (with-meta (meta this))))
   (skip [this amount] (-> (SQLQuery. source fields where order amount limit jdbc-opts) (with-meta (meta this))))
@@ -138,46 +139,69 @@
 
 ;; Relational entity
 
-(defrecord RelationalEntity [db table name pk fields relations]
-  core/Entity
-  (create [this data] (insert db table data))
-  (fetch-by-id [this id] (-> (find this {(or pk :id) id}) fetch first))
-  (find [this] (find this nil))
-  (find [this where]
-    (let [source [table name]
-          fields (mapv (partial f/prefix name) fields)
-          repository @(:repository (meta this) (delay {}))
-          eager (->> relations
+(defn- build-query [entity where with-eager-fetch]
+  (let [{:keys [name table pk]} entity
+        repository @(:repository (meta entity) (delay {}))
+        relations (->> (:relations entity)
+                       (filter (comp (partial contains? repository) :entity val))
+                       (map (fn [[k v]] [(f/prefix name k) v]))
+                       (into {}))
+        eager (when with-eager-fetch
+                (->> relations
                      (filter (comp :eager val))
                      (filter (comp #{:has-one :belongs-to} :type val))
-                     (filter (comp (partial contains? repository) :entity val))
-                     (into {}))
-          fields (reduce (fn [result [k v]]
-                           (->> (:fields ((:entity v) repository))
-                                (map (partial f/prefix (f/prefix name k)))
-                                (into result)))
-                         fields
-                         eager)
-          source (reduce (fn [left-src [k v]]
-                           (let [entity ((:entity v) repository)
-                                 alias (f/prefix name k)
-                                 clause (condp = (:type v)
-                                          :has-one {(f/prefix name pk) (f/prefix alias (:fk v))}
-                                          :belongs-to {(f/prefix name (:fk v)) (f/prefix alias (:pk entity))})]
-                             [left-src :left-join [(:table entity) alias] clause]))
-                         source
-                         eager)
-          where (f/ensure-prefixed name where)
-          filter (f/ensure-prefixed name (:filter this))
-          where (if (and filter where) (list 'and filter where) (or filter where))]
-      (select db source fields where nil nil nil {:builder-fn as-entity-maps :entity this})))
+                     (into {})))
+        fields (reduce (fn [result [k v]]
+                         (->> (:fields ((:entity v) repository))
+                              (map (partial f/prefix k))
+                              (into result)))
+                       (mapv (partial f/prefix name) (:fields entity))
+                       eager)
+        where (f/conjunct-clauses
+               (f/ensure-prefixed name (:filter entity))
+               (f/ensure-prefixed name where))
+        ks (->> (flatten-map where) (filter keyword?))
+        implicit-rels (->> (apply dissoc relations (keys eager))
+                           (filter #(some (partial f/prefixed? (key %)) ks))
+                           (into {}))
+        source (reduce (fn [left-src [k v]]
+                         (let [r-entity ((:entity v) repository)
+                               clause (condp = (:type v)
+                                        :has-one {(f/prefix name pk) (f/prefix k (:fk v))}
+                                        :belongs-to {(f/prefix name (:fk v)) (f/prefix k (:pk r-entity))}
+                                        :has-many (-> (str "Filtering by property of a :has-many relation (" k ") is not supported")
+                                                      IllegalArgumentException.
+                                                      throw))]
+                           [left-src :left-join [(:table r-entity) k] clause]))
+                       [table name]
+                       (merge eager implicit-rels))]
+    (select (:db (meta entity)) source fields where nil nil nil {:builder-fn as-entity-maps :entity entity})))
+
+(defrecord RelationalEntity [name table pk fields relations]
+  core/Entity
+  (create [this data] (insert (:db (meta this)) table data))
+  (fetch-by-id [this id] (-> (find this {(or pk :id) id}) fetch first))
+  (find [this] (find this nil))
+  (find [this where] (build-query this where true))
   (find-related [this relation-key where]
-    (let [repository @(:repository (meta this) (delay {}))
-          relation (relation-key relations)
+    (let [relation (or (relation-key relations)
+                       (-> (str "Relation " relation-key " does not exist in " name ". Try one of the following " (keys relations))
+                           IllegalArgumentException.
+                           throw))
+          repository @(:repository (meta this) (delay {}))
           alias (f/prefix name relation-key)
           entity (-> ((:entity relation) repository) (assoc :name alias))
-          base (core/find entity)
-          {:keys [source fields]} base
+          where (f/ensure-prefixed name where)
+          r-where (->> where
+                       (filter (comp (partial f/prefixed? alias) key))
+                       (into {})
+                       not-empty)
+          where (->> (keys r-where)
+                     (apply dissoc where)
+                     not-empty
+                     (f/conjunct-clauses (f/ensure-prefixed name (:filter this))))
+          relation-query (build-query entity (f/conjunct-clauses (:filter relation) r-where) true)
+          base-query (build-query this where false)
           clause (condp = (:type relation)
                    :has-one {(f/prefix name pk) (f/prefix alias (:fk relation))}
                    :belongs-to {(f/prefix name (:fk relation)) (f/prefix alias (:pk entity))}
@@ -185,30 +209,25 @@
                                {(f/prefix alias (:pk entity)) (f/prefix (:join-table relation) (:rfk relation))}
                                {(f/prefix name pk) (f/prefix alias (:fk relation))}))
           r-source (if (:join-table relation)
-                     [[table name] :left-join (:join-table relation) {(f/prefix name pk) (f/prefix (:join-table relation) (:fk relation))}]
-                     [table name])
-          source [source :right-join r-source clause]
-          where (f/ensure-prefixed name where)
-          where (if (and (:where base) where) (list 'and (:where base) where) (or (:where base) where))
-          filter (f/ensure-prefixed name (:filter this))
-          r-filter (f/ensure-prefixed alias (:filter relation))
-          filter (if (and filter r-filter) (list 'and filter r-filter) (or filter r-filter))
-          where (if (and filter where) (list 'and filter where) (or filter where))]
-      (select db source fields where nil nil nil {:builder-fn as-entity-maps :entity entity})))
-  (update [this where patch] (update db table patch where))
-  (delete [this where] (delete db table where))
+                     [(:source base-query) :left-join (:join-table relation) {(f/prefix name pk) (f/prefix (:join-table relation) (:fk relation))}]
+                     (:source base-query))]
+      (-> relation-query
+          (assoc :source [(:source relation-query) :right-join r-source clause])
+          (assoc :where (f/conjunct-clauses (:where relation-query) (:where base-query))))))
+  (update [this where patch] (update (:db (meta this)) table patch where))
+  (delete [this where] (delete (:db (meta this)) table where))
   (with-filter [this where] (assoc this :filter where))
   (with-relations [this new-relations]
-    (-> (RelationalEntity. db table name pk fields (merge relations new-relations))
+    (-> (RelationalEntity. name table pk fields (merge relations new-relations))
         (with-meta (meta this))))
   (with-eager [this rel-keys]
-    (-> (RelationalEntity. db table name pk fields (reduce #(clojure.core/update %1 %2 assoc :eager true) relations rel-keys))
+    (-> (RelationalEntity. name table pk fields (reduce #(clojure.core/update %1 %2 assoc :eager true) relations rel-keys))
         (with-meta (meta this)))))
 
 ;; SQL repository
 
-(defn- build-relational-entity [opts entity-meta name entity]
-  (let [fields (->> (select (:db opts)
+(defn create-entity [entity-meta entity]
+  (let [fields (->> (select (:db entity-meta)
                             :information-schema/columns
                             [:column-name]
                             {:table-schema [:ilike "public"]
@@ -217,18 +236,16 @@
                     (mapv (comp ->kebab-case-keyword :column-name)))
         fields (if (empty? fields) (:fields entity fields) fields)]
     (-> entity
-        (assoc :name name)
         (assoc :pk (:pk entity :id))
         (assoc :fields fields)
-        (->> (merge opts))
         map->RelationalEntity
         (with-meta entity-meta))))
 
 (defmethod create-repository (.-name *ns*) [_ entities & [opts]]
-  (let [entity-meta {:repository (promise)}
-        build-entity (partial build-relational-entity opts entity-meta)]
+  (let [entity-meta (assoc opts :repository (promise))
+        build-entity (partial create-entity entity-meta)]
     (->> entities
-         (map (fn [[k v]] [k (build-entity k v)]))
+         (map (fn [[k v]] [k (build-entity (assoc v :name k))]))
          (into {})
          (#(with-meta % opts))
          (deliver (:repository entity-meta))

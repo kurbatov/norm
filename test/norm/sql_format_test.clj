@@ -66,6 +66,15 @@
   (is (= "((id = ? OR name = ?) AND role = ?)" (f/format-clause {:or {:id 1 :name "John"} :role "admin"})))
   (is (= "(((id = ? OR name = ?)) AND (role = ?))" (f/format-clause '(and {:or {:id 1 :name "John"}} {:role "admin"})))))
 
+(deftest conjunct-clauses-test
+  (is (= {:id 1} (f/conjunct-clauses {:id 1})))
+  (is (= {:id 1} (f/conjunct-clauses {:id 1} nil)))
+  (is (= {:id 1} (f/conjunct-clauses nil {:id 1})))
+  (is (= {:id 1} (f/conjunct-clauses nil {:id 1} nil)))
+  (is (= (list 'and {:role "admin"} {:id 1}) (f/conjunct-clauses {:role "admin"} {:id 1})))
+  (is (= (list 'and (list 'and {:role "admin"} {:id 1}) {:active true})
+         (f/conjunct-clauses {:role "admin"} {:id 1} {:active true}))))
+
 (deftest format-source-test
   (testing "Simple case"
     (is (= "users AS \"users\"" (f/format-source :users)))

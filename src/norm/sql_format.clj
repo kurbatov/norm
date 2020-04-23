@@ -136,6 +136,11 @@
        (walk/prewalk convert-clause-map)
        (walk/postwalk convert-clause-list)))
 
+(defn conjunct-clauses
+  ([x] x)
+  ([x y] (if (and x y) (list 'and x y) (or x y)))
+  ([x y & more] (apply conjunct-clauses (conjunct-clauses x y) more)))
+
 ;; Source and target
 
 (defn format-source

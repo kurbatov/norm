@@ -2,8 +2,7 @@
   (:require [clojure.test :as t :refer [deftest testing is]]
             [next.jdbc :as jdbc]
             [norm.core :as norm :refer [join where order skip limit fetch fetch-count]]
-            [norm.sql :as sql])
-  (:import [norm.sql RelationalEntity]))
+            [norm.sql :as sql]))
 
 (deftest sql-query-test
   (testing "Query building"
@@ -125,8 +124,8 @@
   (with-open [conn (jdbc/get-connection {:dbtype "h2:mem"})]
     (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL, name VARCHAR(100), gender VARCHAR(10), birthday DATE)"])
     (jdbc/execute! conn ["CREATE TABLE users (id BIGINT, login VARCHAR(100), role VARCHAR(50), active BOOLEAN)"])
-    (let [person (sql/->RelationalEntity conn :people :person :id [:id :name :gender :birthday] {})
-          user (sql/->RelationalEntity conn :users :user :id [:id :login :role :active] {})]
+    (let [person (sql/create-entity {:db conn} {:name :person, :table :people, :fields [:id :name :gender :birthday]})
+          user (sql/create-entity {:db conn} {:name :user, :table :users, :fields [:id :login :role :active]})]
       (testing "creation"
         (is (= {:id 1} (-> (norm/create person {:name "John Doe" :gender "male"}) norm/execute)))
         (is (= {:id 2} (-> (norm/create person {:name "Jane Doe" :gender "female"}) norm/execute)))
@@ -178,29 +177,24 @@
 
 (def entities
   {:person {:table :people
-            :pk :id
             :relations {:contacts {:entity :contact
                                    :type :has-many
                                    :fk :person-id}}}
    :contact {:table :contacts
-             :pk :id
              :relations {:owner {:entity :person
                                  :type :belongs-to
                                  :fk :person-id
                                  :eager true}}}
    :user {:table :users
-          :pk :id
           :relations {:person {:entity :person
                                :type :belongs-to
                                :fk :id
                                :eager true}}}
    :user-secret {:table :secrets
-                 :pk :id
                  :relations {:owner {:entity :user
                                      :type :belongs-to
                                      :fk :id}}}
    :employee {:table :employees
-              :pk :id
               :relations {:person {:entity :person
                                    :type :belongs-to
                                    :fk :id
@@ -225,7 +219,6 @@
                                                 :join-table :employees-responsibilities-negative
                                                 :filter {:active true}}}}
    :responsibility {:table :responsibilities
-                    :pk :id
                     :relations {:employees {:entity :employee
                                             :type :has-many
                                             :fk :responsibility-id
@@ -264,6 +257,8 @@ WHERE er.employee_id IS NULL)"])
     (jdbc/execute! conn ["INSERT INTO users (id, login, active) VALUES (2, 'jane.doe', false)"])
     (jdbc/execute! conn ["INSERT INTO users (id, login, active) VALUES (3, 'zoe.doe', true)"])
     (jdbc/execute! conn ["INSERT INTO secrets (id, secret) VALUES (1, 'sha256(xxxxxxx)')"])
+    (jdbc/execute! conn ["INSERT INTO secrets (id, secret) VALUES (2, 'sha256(yyyyyyy)')"])
+    (jdbc/execute! conn ["INSERT INTO secrets (id, secret) VALUES (3, 'sha256(zzzzzzz)')"])
     (jdbc/execute! conn ["INSERT INTO employees (id, salary) VALUES (1, 1500)"])
     (jdbc/execute! conn ["INSERT INTO employees (id, supervisor_id, salary) VALUES (2, 1, 3000)"])
     (jdbc/execute! conn ["INSERT INTO employees (id, supervisor_id, salary, active) VALUES (3, 1, 3100, false)"])
@@ -277,7 +272,7 @@ WHERE er.employee_id IS NULL)"])
     (jdbc/execute! conn ["INSERT INTO employees_responsibilities (employee_id, responsibility_id) VALUES (3, 2)"])
     (jdbc/execute! conn ["INSERT INTO employees_responsibilities (employee_id, responsibility_id) VALUES (3, 4)"])
     (let [repository (norm/create-repository :sql entities {:db conn})]
-      (is (instance? RelationalEntity (:person repository)))
+      #_(is (instance? norm.sql.RelationalEntity (:person repository)))
       (is (= repository @(:repository (meta (:person repository)))) "Entity must have repository in metadata.")
       (testing "Fields populated."
         (is (= [:id :name :gender :birthday] (get-in repository [:person :fields])))
@@ -315,8 +310,8 @@ WHERE er.employee_id IS NULL)"])
                    (where {:employee.person/name "Jane Doe"})
                    fetch))
             "Clause by related entity's fields must work."))
-      (testing "filter by related entities"
-        #_(is (= [] (-> (norm/find (:user-secret repository) {:owner/login "john.doe"}) fetch))))
+      (testing "filter by related entities without fetching"
+        (is (= [{:id 1, :secret "sha256(xxxxxxx)"}] (-> (norm/find (:user-secret repository) {:owner/login "john.doe"}) fetch))))
       (testing "fetching related entities"
         (is (= [{:id 1 :name "John Doe" :gender "male"}]
                (-> (norm/find-related (:user repository) :person {:id 1}) fetch)
@@ -336,7 +331,13 @@ WHERE er.employee_id IS NULL)"])
         (is (= [{:id 2 :supervisor-id 1 :salary 3000.0000M :active true :person {:id 2 :name "Jane Doe" :gender "female"}}]
                (-> (norm/find-related (:employee repository) :subordinates {:id 1}) fetch)))
         (is (= [{:id 1 :salary 1500.0000M :active true :person {:id 1 :name "John Doe" :gender "male"}}]
-               (-> (norm/find-related (:employee repository) :supervisor {:id 2}) fetch))))
+               (-> (norm/find-related (:employee repository) :supervisor {:id 2}) fetch)))
+        (is (= [{:id 1 :name "John Doe" :gender "male"}]
+               (-> (norm/find-related (:contact repository) :owner {:value "john.doe@mailinator.com"}) fetch))
+            "Filtering by a field of the main entity should work.")
+        (is (= [{:id 1 :login "john.doe" :active true :person {:id 1 :name "John Doe" :gender "male"}}]
+               (-> (norm/find-related (:user-secret repository) :owner {:owner.person/name "John Doe"}) fetch))
+            "Clause by a related entity's relation should join the source to the query."))
       (testing "fetch with filter"
         (is (= [{:id 1 :login "john.doe" :active true :person {:id 1, :name "John Doe", :gender "male"}}
                 {:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
