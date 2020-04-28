@@ -1,6 +1,6 @@
-(ns norm.sql-format-test
+(ns norm.sql.format-test
   (:require [clojure.test :as t :refer [deftest testing is]]
-            [norm.sql-format :as f]
+            [norm.sql.format :as f]
             [norm.sql :as sql]))
 
 (deftest prefix-test
@@ -48,7 +48,8 @@
   (is (= "COUNT(id)" (f/format-field '(count :id))) "Aggregation should be applied.")
   (is (= "COUNT(\"user\".id)" (f/format-field '(count :user/id))) "Namespace gets quoted inside an aggregation.")
   (is (= "COUNT(id) AS \"count\"" (f/format-field ['(count :id) :count])) "Aggregation is aliased")
-  (is (= "COUNT(\"user\".id) AS \"user/count\"" (f/format-field ['(count :user/id) :user/count]))))
+  (is (= "COUNT(\"user\".id) AS \"user/count\"" (f/format-field ['(count :user/id) :user/count])))
+  (is (= "(\"employee\".id IS NOT NULL) AS \"employee\"" (f/format-field ['(not= :employee/id nil) :employee]))))
 
 (deftest format-clause-test
   (is (= "(id = ?)" (f/format-clause {:id 1})))

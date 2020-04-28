@@ -129,7 +129,7 @@
       (testing "creation"
         (is (= {:id 1} (-> (norm/create person {:name "John Doe" :gender "male"}) norm/execute)))
         (is (= {:id 2} (-> (norm/create person {:name "Jane Doe" :gender "female"}) norm/execute)))
-        (is (= nil (-> (norm/create user {:id 1 :login "john" :role "user"}) norm/execute))))
+        (is (= {:id 1} (-> (norm/create user {:id 1 :login "john" :role "user"}) norm/execute))))
       (testing "fetching"
         (is (= {:id 1 :name "John Doe" :gender "male"} (norm/fetch-by-id person 1)))
         (is (= (merge norm/instance-meta {:entity person}) (-> (norm/fetch-by-id person 1) meta))
@@ -148,7 +148,7 @@
         (is (= [{:id 1 :name "John Doe" :gender "male"}]
                (-> (norm/find person {:birthday nil}) (order {:id :desc}) (skip 1) (limit 1) fetch))))
       (testing "update"
-        (is (= {:next.jdbc/update-count 1} (-> (norm/update person {:id 2} {:name "Jane Love"}) norm/execute)))
+        (is (= {:next.jdbc/update-count 1} (-> (norm/update person {:name "Jane Love"} {:id 2}) norm/execute)))
         (is (= {:id 2 :name "Jane Love" :gender "female"} (norm/fetch-by-id person 2)) "Entity must change after update."))
       (testing "delete"
         (is (= {:next.jdbc/update-count 1} (-> (norm/delete person {:id 2}) norm/execute)))
@@ -191,7 +191,7 @@
                                :fk :id
                                :eager true}}}
    :user-secret {:table :secrets
-                 :relations {:owner {:entity :user
+                 :relations {:user {:entity :user
                                      :type :belongs-to
                                      :fk :id}}}
    :employee {:table :employees
@@ -285,6 +285,18 @@ WHERE er.employee_id IS NULL)"])
                (-> (norm/find (:employee repository) {:person/name "Jane Doe"}) str)
                (-> (norm/find (:employee repository) {:employee.person/name "Jane Doe"}) str)
                (-> (norm/find (:employee repository)) (where {:employee.person/name "Jane Doe"}) str))))
+      (testing "creation with embedded entities"
+        (is (= {:id 4}
+               (-> (norm/create
+                    (:user-secret repository)
+                    {:secret "sha256xxxx"
+                     :user {:login "buzz.lightyear"
+                            :active false
+                            :person {:name "Buzz Lightyear"}}})
+                   norm/execute)))
+        (is (= {:id 4 :secret "sha256xxxx"} (norm/fetch-by-id (:user-secret repository) 4)))
+        (is (= {:id 4 :login "buzz.lightyear" :active false :person {:id 4 :name "Buzz Lightyear"}}
+               (norm/fetch-by-id (:user repository) 4))))
       (testing "eager fetching"
         (let [instance (norm/fetch-by-id (:user repository) 1)]
           (is (= {:id 1
@@ -311,7 +323,7 @@ WHERE er.employee_id IS NULL)"])
                    fetch))
             "Clause by related entity's fields must work."))
       (testing "filter by related entities without fetching"
-        (is (= [{:id 1, :secret "sha256(xxxxxxx)"}] (-> (norm/find (:user-secret repository) {:owner/login "john.doe"}) fetch))))
+        (is (= [{:id 1, :secret "sha256(xxxxxxx)"}] (-> (norm/find (:user-secret repository) {:user/login "john.doe"}) fetch))))
       (testing "fetching related entities"
         (is (= [{:id 1 :name "John Doe" :gender "male"}]
                (-> (norm/find-related (:user repository) :person {:id 1}) fetch)
@@ -336,7 +348,7 @@ WHERE er.employee_id IS NULL)"])
                (-> (norm/find-related (:contact repository) :owner {:value "john.doe@mailinator.com"}) fetch))
             "Filtering by a field of the main entity should work.")
         (is (= [{:id 1 :login "john.doe" :active true :person {:id 1 :name "John Doe" :gender "male"}}]
-               (-> (norm/find-related (:user-secret repository) :owner {:owner.person/name "John Doe"}) fetch))
+               (-> (norm/find-related (:user-secret repository) :user {:user.person/name "John Doe"}) fetch))
             "Clause by a related entity's relation should join the source to the query."))
       (testing "fetch with filter"
         (is (= [{:id 1 :login "john.doe" :active true :person {:id 1, :name "John Doe", :gender "male"}}

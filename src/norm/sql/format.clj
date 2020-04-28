@@ -1,4 +1,4 @@
-(ns norm.sql-format
+(ns norm.sql.format
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
             [camel-snake-kebab.core :refer [->snake_case_string]]))
@@ -38,6 +38,13 @@
 (defn format-keyword-quoted [x] (cond->> (->snake_case_string (name x))
                                   (namespace x) (str (sql-quote (->snake_case_string (namespace x))) ".")))
 
+(defn format-value [x]
+  (cond
+    (nil? x) "NULL"
+    (boolean? x) x
+    (keyword? x) (format-keyword-quoted x)
+    :else "?"))
+
 (defn format-alias [x]
   (if (keyword? x)
     (if (namespace x)
@@ -45,22 +52,19 @@
       (name x))
     x))
 
+(declare predicates)
+
 (defn format-field
   ([field]
    (cond
      (keyword? field) (format-keyword-quoted field)
-     (list? field) (wrapper (str/upper-case (str (first field))) (format-field (second field)))
+     (list? field) (if (contains? predicates (first field))
+                     (wrap (apply (get predicates (first field)) (format-field (second field)) (map format-value (nnext field))))
+                     (wrapper (str/upper-case (str (first field))) (format-field (second field))))
      (vector? field) (apply format-field field)
      :else field))
   ([field alias]
    (infix (format-field field) "AS" (sql-quote (format-alias alias)))))
-
-(defn format-value [x]
-  (cond
-    (nil? x) "NULL"
-    (boolean? x) x
-    (keyword? x) (format-keyword-quoted x)
-    :else "?"))
 
 ;; Predicates
 

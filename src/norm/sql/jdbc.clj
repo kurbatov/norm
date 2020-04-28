@@ -1,9 +1,9 @@
-(ns norm.jdbc
+(ns norm.sql.jdbc
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
             [next.jdbc.result-set :refer [RowBuilder ResultSetBuilder read-column-by-index]]
             [norm.core :refer [instance-meta]]
-            [norm.sql-format :refer [format-alias]])
+            [norm.sql.format :refer [format-alias]])
   (:import [java.sql ResultSet ResultSetMetaData]
            [java.util Locale]))
 

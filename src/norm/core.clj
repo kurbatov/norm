@@ -32,6 +32,11 @@
         execute)
     ```"))
 
+(extend-protocol Command
+  nil
+  (execute [command] command)
+  (then [_ next-command] next-command))
+
 (defprotocol Query
   "A query to an abstract storage."
   :extend-via-metadata true
@@ -146,7 +151,7 @@
   (fetch-by-id ^Instance [entity id] "Fetches an instance of the entity with specified id from the storage.")
   (find ^Query [entity] ^Query [entity where] "Builds a query that provides instances of the entity when fetched.")
   (find-related ^Query [entity relation where] "Builds a query that provides instances of the related entity when fetched.")
-  (update ^Command [entity where patch] "Builds a command that updates state of entities in the storage when executed.")
+  (update ^Command [entity patch where] "Builds a command that updates state of entities in the storage when executed.")
   (delete ^Command [entity where] "Builds a command that deletes entities from the storage when executed.")
   (with-filter ^Entity [entity where]
     "Creates a new entity based on the specified one applying the filter.
@@ -189,7 +194,7 @@
   {`persist (fn persist [instance]
               (let [{:keys [entity]} (meta instance)
                     {:keys [pk fields]} entity]
-                (update entity {pk (pk instance)} (select-keys instance (disj (set fields) pk)))))
+                (update entity (select-keys instance (disj (set fields) pk)) {pk (pk instance)})))
    `remove (fn remove [instance]
              (let [{:keys [entity]} (meta instance)
                    {:keys [pk]} entity]

@@ -5,8 +5,8 @@
             [next.jdbc.result-set :as rs]
             [camel-snake-kebab.core :refer [->kebab-case-keyword]]
             [norm.core :as core :refer [where fetch find create-repository]]
-            [norm.sql-format :as f]
-            [norm.jdbc :refer [as-entity-maps]]
+            [norm.sql.format :as f]
+            [norm.sql.jdbc :refer [as-entity-maps]]
             [norm.util :refer [flatten-map]])
   (:import [norm.core Command Query]))
 
@@ -37,84 +37,118 @@
   (str "DELETE FROM " (f/format-target target)
        (when where (str " WHERE " (f/format-clause where)))))
 
-(defn execute-sql-command [command]
+(defn- execute-sql-command [command]
   (let [{:keys [type values where]} command
         db (:db (meta command))
         params (if (vector? values) (flatten (rest values)) (and values (f/extract-values values)))
         params (if where (concat params (f/extract-values where)) params)
-        command (if params (apply vector (generate-sql-command command) params) [(generate-sql-command command)])]
+        command (apply vector (generate-sql-command command) params)]
     (jdbc/execute-one! db command (when (= :insert type) default-jdbc-opts))))
 
 (declare sql-command-meta)
 
 (defn transaction
-  "Constructs a chain of commands that will be executed in a transaction."
+  "Constructs chain of commands that will be executed in a transaction."
   ^Command
   [db & commands]
-  (if (sequential? (first commands))
-    (-> (first commands)
-        (concat (rest commands))
-        (->> (mapv identity))
-        (with-meta (merge sql-command-meta {:db db})))
-    (with-meta commands (merge sql-command-meta {:db db}))))
+  (if (vector? (first commands))
+    (into (first commands) (rest commands))
+    (with-meta (into [] commands) (assoc sql-command-meta :db db))))
+
+(defn- execute-transaction [tx transaction]
+  (loop [results []
+         commands transaction]
+    (if (not-empty commands)
+      (let [command (-> (first commands) (vary-meta assoc :db tx))
+            command (if (fn? command)
+                      (-> (command results) (vary-meta merge (meta command)))
+                      command)
+            result (cond-> (core/execute command)
+                     (:tx-result (meta command)) (vary-meta assoc :tx-result true))]
+        (recur (conj results result) (rest commands)))
+      (if-let [tx-result (->> results (filter (comp :tx-result meta)) first)]
+        (vary-meta tx-result dissoc :tx-result)
+        results))))
 
 (def sql-command-meta
   {`core/execute (fn execute-command [command]
-                   (let [db (:db (meta command))]
-                     (if (sequential? command)
-                       (jdbc/with-transaction [tx db]
-                         (->> command
-                              (map #(vary-meta % assoc :db tx))
-                              (mapv core/execute)))
-                       (execute-sql-command command))))
+                   (let [{:keys [db entity relation]} (meta command)
+                         result (if (vector? command)
+                                  (if (:tx-propagation (meta command))
+                                    (execute-transaction db command)
+                                    (jdbc/with-transaction [tx db] (execute-transaction tx command)))
+                                  (or (execute-sql-command command) (select-keys (:values command) [(:pk entity)])))]
+                     (cond-> result
+                       entity (vary-meta assoc :entity entity )
+                       relation (vary-meta assoc :relation relation))))
    `core/then (fn then [command next-command]
-                (transaction (:db (meta command)) command next-command))})
+                (if next-command
+                  (transaction (:db (meta command)) command next-command)
+                  command))})
 
 (defn insert
   "Constructs an insert command."
   ^Command
   [db target values]
   (-> {:type :insert :target target :values values}
-      (with-meta (merge sql-command-meta {:db db}))))
+      (with-meta (assoc sql-command-meta :db db))))
 
 (defn update
   "Constructs an update command."
   ^Command
   [db target values where]
   (-> {:type :update :target target :values values :where where}
-      (with-meta (merge sql-command-meta {:db db}))))
+      (with-meta (assoc sql-command-meta :db db))))
 
 (defn delete
   "Constructs a delete command."
   ^Command
   [db target where]
   (-> {:type :delete :target target :where where}
-      (with-meta (merge sql-command-meta {:db db}))))
+      (with-meta (assoc sql-command-meta :db db))))
 
 ;; Query builder
 
 (defrecord SQLQuery [source fields where order offset limit jdbc-opts]
-  core/Query
-  (join [this op r-source clause] (SQLQuery. [source op r-source clause] fields where order offset limit jdbc-opts))
-  (where [this clauses]
-         (->
-          (SQLQuery. source fields (f/conjunct-clauses where clauses) order offset limit jdbc-opts)
-          (with-meta (meta this))))
-  (order [this order] (-> (SQLQuery. source fields where order offset limit jdbc-opts) (with-meta (meta this))))
-  (skip [this amount] (-> (SQLQuery. source fields where order amount limit jdbc-opts) (with-meta (meta this))))
-  (limit [this amount] (-> (SQLQuery. source fields where order offset amount jdbc-opts) (with-meta (meta this))))
-  (fetch [this]
+  core/Command
+  (execute [this]
     (let [values (cond-> (f/extract-values where)
                    limit (conj limit)
                    offset (conj offset))
           query (apply vector (str this) values)
           db (:db (meta this))]
       (jdbc/execute! db query (merge default-jdbc-opts jdbc-opts))))
-  (fetch [this fields] (fetch (-> (SQLQuery. source fields where order offset limit jdbc-opts) (with-meta (meta this)))))
-  (fetch-count [this] (-> (SQLQuery. source [['(count :*) :count]] where nil nil nil jdbc-opts) (with-meta (meta this)) fetch first :count))
-  core/Command
-  (execute [this] (fetch this))
-  (then [this next-command] (transaction (:db (meta this)) this next-command))
+  (then [this next-command]
+    (transaction (:db (meta this)) this next-command))
+  
+  core/Query
+  (join [this op r-source clause]
+    (-> (SQLQuery. [source op r-source clause] fields where order offset limit jdbc-opts)
+        (with-meta (meta this))))
+  (where [this clauses]
+    (-> (SQLQuery. source fields (f/conjunct-clauses where clauses) order offset limit jdbc-opts)
+        (with-meta (meta this))))
+  (order [this order]
+    (-> (SQLQuery. source fields where order offset limit jdbc-opts)
+        (with-meta (meta this))))
+  (skip [this amount]
+    (-> (SQLQuery. source fields where order amount limit jdbc-opts)
+        (with-meta (meta this))))
+  (limit [this amount]
+    (-> (SQLQuery. source fields where order offset amount jdbc-opts)
+        (with-meta (meta this))))
+  (fetch [this] (core/execute this))
+  (fetch [this fields]
+    (-> (SQLQuery. source fields where order offset limit jdbc-opts)
+        (with-meta (meta this))
+        fetch))
+  (fetch-count [this]
+    (-> (SQLQuery. source [['(count :*) :count]] where nil nil nil jdbc-opts)
+        (with-meta (meta this))
+        fetch
+        first
+        :count))
+  
   Object
   (toString [this]
     (cond->
@@ -135,7 +169,9 @@
   ([db source fields where order] (select db source fields where order nil))
   ([db source fields where order offset] (select db source fields where order offset nil))
   ([db source fields where order offset limit] (select db source fields where order offset limit nil))
-  ([db source fields where order offset limit jdbc-opts] (-> (->SQLQuery source fields where order offset limit jdbc-opts) (with-meta {:db db}))))
+  ([db source fields where order offset limit jdbc-opts]
+   (-> (->SQLQuery source fields where order offset limit jdbc-opts)
+       (with-meta (merge jdbc-opts {:db db})))))
 
 ;; Relational entity
 
@@ -179,7 +215,47 @@
 
 (defrecord RelationalEntity [name table pk fields relations]
   core/Entity
-  (create [this data] (insert (:db (meta this)) table data))
+  (create [this data]
+    (let [{:keys [db repository]} (meta this)
+          repository @(or repository (delay {}))
+          embedded-rels (filter (comp (partial contains? data) key) relations)
+          instance (apply dissoc data (map key embedded-rels))
+          dependencies (filter (comp (partial = :belongs-to) :type val) embedded-rels)
+          dependents (filter (comp (partial = :has-one) :type val) embedded-rels)
+          into-creation (fn into-creation [[k v]]
+                          (-> (core/create ((:entity v) repository) (k data))
+                              (vary-meta assoc :relation v)))
+          create-dependencies (->> dependencies
+                                   (map into-creation)
+                                   (map #(vary-meta % assoc :tx-propagation true))
+                                   (into [])
+                                   (#(with-meta % (assoc sql-command-meta :db db :entity this))))
+          owner-idx (count dependencies)
+          create-this (if (zero? owner-idx)
+                      (insert db table instance)
+                      (fn creating-entity [results]
+                        (->> results
+                             (map #(let [relation (:relation (meta %))
+                                         entity ((:entity relation) repository)]
+                                     [(:fk relation) ((:pk entity) %)]))
+                             (into instance)
+                             (insert db table))))
+          create-this (cond-> (vary-meta create-this assoc :entity this)
+                        (not-empty embedded-rels) (vary-meta assoc :tx-result true))
+          create-dependents (map (fn [[k v]]
+                                   (let [entity ((:entity v) repository)
+                                         instance (k data)]
+                                     (if (pk data)
+                                       (core/create entity (assoc instance (:fk v) (pk data)))
+                                       (fn create-dependent [results]
+                                         (->> (nth results owner-idx)
+                                              pk
+                                              (assoc instance (:fk v))
+                                              (core/create entity))))))
+                                 dependents)]
+      (if (empty? embedded-rels)
+        create-this
+        (apply core/then create-dependencies create-this create-dependents))))
   (fetch-by-id [this id] (-> (find this {(or pk :id) id}) fetch first))
   (find [this] (find this nil))
   (find [this where] (build-query this where true))
@@ -214,7 +290,7 @@
       (-> relation-query
           (assoc :source [(:source relation-query) :right-join r-source clause])
           (assoc :where (f/conjunct-clauses (:where relation-query) (:where base-query))))))
-  (update [this where patch] (update (:db (meta this)) table patch where))
+  (update [this patch where] (update (:db (meta this)) table patch where))
   (delete [this where] (delete (:db (meta this)) table where))
   (with-filter [this where] (assoc this :filter where))
   (with-relations [this new-relations]
@@ -230,7 +306,7 @@
   (let [fields (->> (select (:db entity-meta)
                             :information-schema/columns
                             [:column-name]
-                            {:table-schema [:ilike "public"]
+                            {:table-schema [:ilike "public"] ;TODO get default schema from DB
                              :table-name   [:ilike (f/format-keyword (:table entity))]})
                     fetch
                     (mapv (comp ->kebab-case-keyword :column-name)))
