@@ -6,7 +6,11 @@ pom.xml
 pom.xml.asc
 *.jar
 *.class
+.classpath
 /.lein-*
 /.nrepl-port
 .hgignore
 .hg/
+.project
+.settings
+.vscode

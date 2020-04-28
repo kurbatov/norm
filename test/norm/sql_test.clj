@@ -2,7 +2,10 @@
   (:require [clojure.test :as t :refer [deftest testing is]]
             [next.jdbc :as jdbc]
             [norm.core :as norm :refer [join where order skip limit fetch fetch-count]]
-            [norm.sql :as sql]))
+            [norm.sql :as sql]
+            [norm.sql.specs :as sql.specs]))
+
+(sql.specs/instrument)
 
 (deftest sql-query-test
   (testing "Query building"
@@ -357,3 +360,5 @@ WHERE er.employee_id IS NULL)"])
         (is (= [{:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
                (-> (:user repository) (norm/with-filter {:active true}) (norm/find {:person/gender "female"}) fetch)))
         ))))
+
+(sql.specs/unstrument)
