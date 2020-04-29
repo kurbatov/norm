@@ -1,11 +1,23 @@
 (ns norm.sql.jdbc
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
-            [next.jdbc.result-set :refer [RowBuilder ResultSetBuilder read-column-by-index]]
+            [next.jdbc.result-set :refer [ReadableColumn
+                                          RowBuilder
+                                          ResultSetBuilder
+                                          read-column-by-index
+                                          clob->string]]
             [norm.core :refer [instance-meta]]
             [norm.sql.format :refer [format-alias]])
-  (:import [java.sql ResultSet ResultSetMetaData]
+  (:import [java.sql ResultSet ResultSetMetaData Blob Clob]
            [java.util Locale]))
+
+(extend-protocol ReadableColumn
+  Blob
+  (read-column-by-label [^Blob v _] (.getBytes v 1 (.length v)))
+  (read-column-by-index [^Blob v _2 _3] (.getBytes v 1 (.length v)))
+  Clob
+  (read-column-by-label [^Clob v _] (clob->string v))
+  (read-column-by-index [^Clob v _2 _3] (clob->string v)))
 
 (defn- assoc-in!
   "Associates a value in a transient nested associative structure, where ks is
