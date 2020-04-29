@@ -1,17 +1,16 @@
 (ns norm.core
-  (:refer-clojure :exclude [find update remove])
-  (:require [clojure.string :refer [split]]))
+  (:refer-clojure :exclude [find update remove]))
 
 (defprotocol Command
   "A command to an abstract storage."
   :extend-via-metadata true
-  (execute [command]
+  (execute! [command]
     "Executes the `command` returning an execution result.
 
     Example:
 
     ```
-    (execute delete-inactive-users)
+    (execute! delete-inactive-users)
     ```")
   (then ^Command [command next-command]
     "Combines two commands for execution in a transaction.
@@ -29,12 +28,12 @@
     (-> first-command
         (then following-command)
         (then final-command)
-        execute)
+        execute!)
     ```"))
 
 (extend-protocol Command
   nil
-  (execute [command] command)
+  (execute! [command] command)
   (then [_ next-command] next-command))
 
 (defprotocol Query
@@ -49,7 +48,7 @@
     (-> users-query
         (join :left-join :people {:users/person-id :people/id})
         (where {:people/name \"John Doe\"})
-        fetch)
+        fetch!)
     ```")
   (where ^Query [query clauses]
     "Adds clauses to the query.
@@ -73,7 +72,7 @@
     (-> users-query
         (where {:user/role \"admin\"
                 :user/login ['ilike \"a%\"]})
-        fetch)
+        fetch!)
     ```")
   (order ^Query [query order]
     "Adds or replaces the order of records of the query result.
@@ -86,11 +85,11 @@
     ```
     (-> users-query
         (order [:name :id])
-        fetch)
+        fetch!)
 
     (-> employees-query
         (order {:salary :desc})
-        fetch)
+        fetch!)
     ```")
   (skip ^Query [query amount]
     "Skips specified amount of records of the result.
@@ -101,7 +100,7 @@
     (-> users-query
         (skip (* page page-size))
         (limit page-size)
-        fetch)
+        fetch!)
     ```")
   (limit ^Query [query amount]
     "Limits the max number of records in the result.
@@ -112,9 +111,9 @@
     (-> users-query
         (skip (* page page-size))
         (limit page-size)
-        fetch)
+        fetch!)
     ```")
-  (fetch [query] [query fields]
+  (fetch! [query] [query fields]
     "Fetches the data that comply to the query.
 
     If `fields` specified, only those fields will be fetched.
@@ -126,9 +125,9 @@
         (where {:role \"admin\"})
         (skip (* page page-size))
         (limit page-size)
-        (fetch [:id :login]))
+        (fetch! [:id :login]))
     ```")
-  (fetch-count ^Long [query]
+  (fetch-count! ^Long [query]
     "Fetches the amount of records for the given query.
 
     Example:
@@ -137,22 +136,27 @@
     (defn get-users-page [page page-size]
       {:page page
        :size page-size
-       :total (fetch-count active-users-query)
+       :total (fetch-count! active-users-query)
        :items (-> active-users-query
                   (skip (* page page-size))
                   (limit page-size)
-                  fetch)})
+                  fetch!)})
     ```"))
 
 (defprotocol Entity
   "A persistent entity."
   :extend-via-metadata true
   (create ^Command [entity data] "Builds a command that creates a new instance of the entity in the storage when executed.")
-  (fetch-by-id ^Instance [entity id] "Fetches an instance of the entity with specified id from the storage.")
+  (fetch-by-id! [entity id] "Fetches an instance of the entity with specified id from the storage immediately.")
   (find ^Query [entity] ^Query [entity where] "Builds a query that provides instances of the entity when fetched.")
   (find-related ^Query [entity relation where] "Builds a query that provides instances of the related entity when fetched.")
   (update ^Command [entity patch where] "Builds a command that updates state of entities in the storage when executed.")
   (delete ^Command [entity where] "Builds a command that deletes entities from the storage when executed.")
+  (create-relation ^Command [entity id relation rel-id]
+    "Builds a command that creates relation between exesting entities when executed.")
+  (delete-relation ^Command [entity id relation rel-id]
+    "Builds a command that deletes relation between exesting entities when executed.
+    The entities will sill be presented in the storage. The command only breaks binding between them.")
   (with-filter ^Entity [entity where]
     "Creates a new entity based on the specified one applying the filter.
 
@@ -183,6 +187,44 @@
     (def user-with-personal-data (with-eager user [:person]))
     ```"))
 
+(defn create!
+  "Creates a new instance of the entity in the storage immediately.
+  Returns a map that contains id (and generated fields if any) of created entity."
+  [entity data]
+  (-> (create entity data) execute!))
+
+(defn find!
+  "Finds and fetches instances of the entity immediately."
+  ([entity] (-> (find entity) fetch!))
+  ([entity where] (-> (find entity where) fetch!)))
+
+(defn find-related!
+  "Finds and fetches instances of the related entity immediately."
+  [entity relation where]
+  (-> (find-related entity relation where) fetch!))
+
+(defn update! 
+  "Updates state of entities in the storage immediately.
+  Returns the count of updated entities."
+  [entity patch where]
+  (-> (update entity patch where) execute!))
+
+(defn delete!
+  "Deletes entities from the storage imeediately.
+  Returns the count of deleted entities."
+  [entity where]
+  (-> (delete entity where) execute!))
+
+(defn create-relation!
+  "Creates relation immediately."
+  [entity id relation rel-id]
+  (-> (create-relation entity id relation rel-id) execute!))
+
+(defn delete-relation!
+  "Deletes relation immediately."
+  [entity id relation rel-id]
+  (-> (delete-relation entity id relation rel-id) execute!))
+
 (defprotocol Instance
   "An instance of a persistent entity."
   :extend-via-metadata true
@@ -205,7 +247,7 @@
   {:arglists '([type entities & [opts]])}
   (fn create-repository-dispatch [type & _]
     (let [type (if (keyword? type)
-                 (-> (str *ns*) (split #"\.") first (str "." (name type)) symbol)
+                 (symbol (str (or (namespace type) "norm") "." (name type)))
                  type)]
       (require type)
       type)))

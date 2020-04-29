@@ -4,7 +4,7 @@
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]
             [camel-snake-kebab.core :refer [->kebab-case-keyword]]
-            [norm.core :as core :refer [where fetch find create-repository]]
+            [norm.core :as core :refer [where create-repository]]
             [norm.sql.format :as f]
             [norm.sql.jdbc :refer [as-entity-maps]]
             [norm.util :refer [flatten-map]])
@@ -63,7 +63,7 @@
             command (if (fn? command)
                       (-> (command results) (vary-meta merge (meta command)))
                       command)
-            result (cond-> (core/execute command)
+            result (cond-> (core/execute! command)
                      (:tx-result (meta command)) (vary-meta assoc :tx-result true))]
         (recur (conj results result) (rest commands)))
       (if-let [tx-result (->> results (filter (comp :tx-result meta)) first)]
@@ -71,16 +71,19 @@
         results))))
 
 (def sql-command-meta
-  {`core/execute (fn execute-command [command]
+  {`core/execute! (fn execute-command [command]
                    (let [{:keys [db entity relation]} (meta command)
+                         default-result (cond-> (:values command)
+                                          (:pk entity) (select-keys [(:pk entity)]))
                          result (if (vector? command)
                                   (if (:tx-propagation (meta command))
                                     (execute-transaction db command)
                                     (jdbc/with-transaction [tx db] (execute-transaction tx command)))
-                                  (or (execute-sql-command command) (select-keys (:values command) [(:pk entity)])))]
+                                  (or (execute-sql-command command) default-result))]
                      (cond-> result
                        entity (vary-meta assoc :entity entity )
-                       relation (vary-meta assoc :relation relation))))
+                       relation (vary-meta assoc :relation relation)
+                       (#{:update :delete} (:type command)) :next.jdbc/update-count)))
    `core/then (fn then [command next-command]
                 (if next-command
                   (transaction (:db (meta command)) command next-command)
@@ -111,7 +114,7 @@
 
 (defrecord SQLQuery [source fields where order offset limit jdbc-opts]
   core/Command
-  (execute [this]
+  (execute! [this]
     (let [values (cond-> (f/extract-values where)
                    limit (conj limit)
                    offset (conj offset))
@@ -137,15 +140,15 @@
   (limit [this amount]
     (-> (SQLQuery. source fields where order offset amount jdbc-opts)
         (with-meta (meta this))))
-  (fetch [this] (core/execute this))
-  (fetch [this fields]
+  (fetch! [this] (core/execute! this))
+  (fetch! [this fields]
     (-> (SQLQuery. source fields where order offset limit jdbc-opts)
         (with-meta (meta this))
-        fetch))
-  (fetch-count [this]
+        core/fetch!))
+  (fetch-count! [this]
     (-> (SQLQuery. source [['(count :*) :count]] where nil nil nil jdbc-opts)
         (with-meta (meta this))
-        fetch
+        core/fetch!
         first
         :count))
   
@@ -155,7 +158,7 @@
      (str
       "SELECT " (->> (or fields [:*]) (map #(if (or (vector? %) (= :* %)) % [% %])) (map f/format-field) (str/join ", "))
       " FROM " (f/format-source source))
-      where (str " WHERE " (f/format-clause where))
+      (seq where) (str " WHERE " (f/format-clause where))
       order (str " ORDER BY " (f/format-order order))
       limit (str " LIMIT ?")
       offset (str " OFFSET ?"))))
@@ -232,14 +235,14 @@
                                    (#(with-meta % (assoc sql-command-meta :db db :entity this))))
           owner-idx (count dependencies)
           create-this (if (zero? owner-idx)
-                      (insert db table instance)
-                      (fn creating-entity [results]
-                        (->> results
-                             (map #(let [relation (:relation (meta %))
-                                         entity ((:entity relation) repository)]
-                                     [(:fk relation) ((:pk entity) %)]))
-                             (into instance)
-                             (insert db table))))
+                        (insert db table instance)
+                        (fn creating-entity [results]
+                          (->> results
+                               (map #(let [relation (:relation (meta %))
+                                           entity ((:entity relation) repository)]
+                                       [(:fk relation) ((:pk entity) %)]))
+                               (into instance)
+                               (insert db table))))
           create-this (cond-> (vary-meta create-this assoc :entity this)
                         (not-empty embedded-rels) (vary-meta assoc :tx-result true))
           create-dependents (map (fn [[k v]]
@@ -256,8 +259,8 @@
       (if (empty? embedded-rels)
         create-this
         (apply core/then create-dependencies create-this create-dependents))))
-  (fetch-by-id [this id] (-> (find this {(or pk :id) id}) fetch first))
-  (find [this] (find this nil))
+  (fetch-by-id! [this id] (-> (core/find! this {(or pk :id) id}) first))
+  (find [this] (core/find this nil))
   (find [this where] (build-query this where true))
   (find-related [this relation-key where]
     (let [relation (or (relation-key relations)
@@ -292,13 +295,38 @@
           (assoc :where (f/conjunct-clauses (:where relation-query) (:where base-query))))))
   (update [this patch where] (update (:db (meta this)) table patch where))
   (delete [this where] (delete (:db (meta this)) table where))
+  (create-relation [this id relation-key rel-id]
+    (let [{:keys [db repository]} (meta this)
+          repository @(or repository (delay {}))
+          relation (relation-key relations)
+          {:keys [type fk rfk join-table]} relation
+          entity ((:entity relation) repository)]
+      (cond
+        (= :belongs-to type)              (core/update this {fk rel-id} {pk id})
+        (and (#{:has-one :has-many} type)
+             (not join-table))            (core/update entity {fk id} {(:pk entity) rel-id})
+        (and (= :has-many type)
+             join-table)                  (insert db join-table {fk id, rfk rel-id}))))
+  (delete-relation [this id relation-key rel-id]
+    (let [{:keys [db repository]} (meta this)
+          repository @(or repository (delay {}))
+          relation (relation-key relations)
+          {:keys [type fk rfk join-table]} relation
+          entity ((:entity relation) repository)]
+      (cond
+        (= :belongs-to type)              (core/update this {fk nil} {pk id, fk rel-id})
+        (and (#{:has-one :has-many} type)
+             (not join-table))            (core/update entity {fk nil} {(:pk entity) rel-id, fk id})
+        (and (= :has-many type)
+             join-table)                  (delete db join-table {fk id, rfk rel-id}))))
   (with-filter [this where] (assoc this :filter where))
   (with-relations [this new-relations]
     (-> (RelationalEntity. name table pk fields (merge relations new-relations))
         (with-meta (meta this))))
   (with-eager [this rel-keys]
-    (-> (RelationalEntity. name table pk fields (reduce #(clojure.core/update %1 %2 assoc :eager true) relations rel-keys))
-        (with-meta (meta this)))))
+    (let [rel-keys (if (sequential? rel-keys) rel-keys [rel-keys])]
+      (-> (RelationalEntity. name table pk fields (reduce #(clojure.core/update %1 %2 assoc :eager true) relations rel-keys))
+          (with-meta (meta this))))))
 
 ;; SQL repository
 
@@ -308,7 +336,7 @@
                             [:column-name]
                             {:table-schema [:ilike "public"] ;TODO get default schema from DB
                              :table-name   [:ilike (f/format-keyword (:table entity))]})
-                    fetch
+                    core/fetch!
                     (mapv (comp ->kebab-case-keyword :column-name)))
         fields (if (empty? fields) (:fields entity fields) fields)]
     (-> entity

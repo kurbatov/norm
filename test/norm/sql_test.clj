@@ -1,7 +1,7 @@
 (ns norm.sql-test
   (:require [clojure.test :as t :refer [deftest testing is]]
             [next.jdbc :as jdbc]
-            [norm.core :as norm :refer [join where order skip limit fetch fetch-count]]
+            [norm.core :as norm :refer [join where order skip limit fetch! fetch-count!]]
             [norm.sql :as sql]
             [norm.sql.specs :as sql.specs]))
 
@@ -14,6 +14,9 @@
     (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\"" (str (sql/select nil :users [:id :name]))))
     (is (= "SELECT \"user\".id AS \"user/id\", \"user\".name AS \"user/name\" FROM users AS \"user\""
            (str (sql/select nil [:users :user] [:user/id :user/name]))))
+    (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\""
+           (str (sql/select nil :users [:id :name] {})))
+        "Empty where clause should not apear in the query.")
     (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" WHERE (id = ?)"
            (str (sql/select nil :users [:id :name] {:id 1}))))
     (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" WHERE (((id = ?) AND (name = ?)) AND (role = ?))"
@@ -47,24 +50,24 @@
             query (select :people [:id :name])]
         (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL, name VARCHAR(100), gender VARCHAR(10), birthday DATE)"])
         (jdbc/execute! conn ["CREATE TABLE users (id BIGINT, login VARCHAR(100), role VARCHAR(50))"])
-        (is (zero? (fetch-count query)))
+        (is (zero? (fetch-count! query)))
         (jdbc/execute! conn ["INSERT INTO people (name, gender) VALUES ('John Doe', 'male')"])
         (jdbc/execute! conn ["INSERT INTO users (id, login) VALUES (1, 'john.doe')"])
-        (is (= 1 (fetch-count query)))
-        (is (= [{:id 1 :name "John Doe"}] (fetch query)))
+        (is (= 1 (fetch-count! query)))
+        (is (= [{:id 1 :name "John Doe"}] (fetch! query)))
         (jdbc/execute! conn ["INSERT INTO people (name, gender) VALUES ('Jane Doe', 'female')"])
-        (is (= 2 (fetch-count query)))
-        (is (= 1 (-> query (where {:id 1}) fetch-count)))
-        (is (= [{:id 1 :name "John Doe"} {:id 2 :name "Jane Doe"}] (-> query (where {:gender ["female", "male"]}) fetch)))
-        (is (= [{:id 2 :name "Jane Doe" :gender "female"}] (-> query (where {:id 2}) (fetch [:id :name :gender]))))
+        (is (= 2 (fetch-count! query)))
+        (is (= 1 (-> query (where {:id 1}) fetch-count!)))
+        (is (= [{:id 1 :name "John Doe"} {:id 2 :name "Jane Doe"}] (-> query (where {:gender ["female", "male"]}) fetch!)))
+        (is (= [{:id 2 :name "Jane Doe" :gender "female"}] (-> query (where {:id 2}) (fetch! [:id :name :gender]))))
         (is (= [{:person/id 1 :person/name "John Doe" :person/gender "male" :user/login "john.doe"}
                 {:person/id 2 :person/name "Jane Doe" :person/gender "female" :user/login nil}]
                (->
                 (select [[:people :person] :left-join [:users :user] {:person/id :user/id}] [:person/id :person/name :person/gender :user/login])
-                fetch)))
-        (is (= [{:id 1 :name "John Doe"} {:id 2 :name "Jane Doe"}] (-> query (where {:or {:id 1 :gender "female"}}) fetch)))
-        (is (= [{:id 1 :name "John Doe"} {:id 2 :name "Jane Doe"}] (-> query (order [:id]) fetch)))
-        (is (= [{:id 2 :name "Jane Doe"} {:id 1 :name "John Doe"}] (-> query (order {:id :desc}) fetch)))))))
+                fetch!)))
+        (is (= [{:id 1 :name "John Doe"} {:id 2 :name "Jane Doe"}] (-> query (where {:or {:id 1 :gender "female"}}) fetch!)))
+        (is (= [{:id 1 :name "John Doe"} {:id 2 :name "Jane Doe"}] (-> query (order [:id]) fetch!)))
+        (is (= [{:id 2 :name "Jane Doe"} {:id 1 :name "John Doe"}] (-> query (order {:id :desc}) fetch!)))))))
 
 (deftest sql-command-test
   (testing "Insert command building"
@@ -84,15 +87,15 @@
     (with-open [conn (jdbc/get-connection {:dbtype "h2:mem"})]
       (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL, name VARCHAR(100) NOT NULL, gender VARCHAR(10), birthday DATE)"])
       (testing "of insert"
-        (is (= {:id 1} (-> (sql/insert conn :people {:name "John Doe"}) norm/execute)))
-        (is (= {:id 2} (-> (sql/insert conn :people [[:name :gender] ["Jane Doe" "female"] ["Zoe Doe" "female"]]) norm/execute)))
-        (is (= 3 (-> (sql/select conn :people) fetch-count)) "Database must contain all the inserted records."))
+        (is (= {:id 1} (-> (sql/insert conn :people {:name "John Doe"}) norm/execute!)))
+        (is (= {:id 2} (-> (sql/insert conn :people [[:name :gender] ["Jane Doe" "female"] ["Zoe Doe" "female"]]) norm/execute!)))
+        (is (= 3 (-> (sql/select conn :people) fetch-count!)) "Database must contain all the inserted records."))
       (testing "of update"
-        (is (= {:next.jdbc/update-count 1} (-> (sql/update conn :people {:gender "male"} {:id 1}) norm/execute)))
-        (is (= [{:id 1 :gender "male"}] (-> (sql/select conn :people [:id :gender] {:id 1}) fetch)) "Row must change after update."))
+        (is (= 1 (-> (sql/update conn :people {:gender "male"} {:id 1}) norm/execute!)))
+        (is (= [{:id 1 :gender "male"}] (-> (sql/select conn :people [:id :gender] {:id 1}) fetch!)) "Row must change after update."))
       (testing "of delete"
-        (is (= {:next.jdbc/update-count 1} (-> (sql/delete conn :people {:id 1}) norm/execute)))
-        (is (= [{:id 2} {:id 3}] (-> (sql/select conn :people [:id]) fetch)) "Deleted row must be missing from the table."))
+        (is (= 1 (-> (sql/delete conn :people {:id 1}) norm/execute!)))
+        (is (= [{:id 2} {:id 3}] (-> (sql/select conn :people [:id]) fetch!)) "Deleted row must be missing from the table."))
       (testing "of transaction"
         (is (= [{:id 4} {:id 5} {:id 6} {:id 7} [{:id 4 :name "Buzz Lightyear"}]]
                (-> (sql/transaction conn
@@ -101,26 +104,26 @@
                                     (sql/insert nil :people {:name "Jessie"})
                                     (sql/insert nil :people {:name "Sid"})
                                     (sql/select nil :people [:id :name] {:name "Buzz Lightyear"}))
-                   norm/execute)))
+                   norm/execute!)))
         (is (= [{:id 4 :name "Buzz Lightyear"}
                 {:id 5 :name "Woody"}
                 {:id 6 :name "Jessie"}
                 {:id 7 :name "Sid"}]
-               (-> (sql/select conn :people [:id :name] {:id [:> 3]}) norm/execute)))
-        (is (= (repeat 4 {:next.jdbc/update-count 1})
+               (-> (sql/select conn :people [:id :name] {:id [:> 3]}) norm/execute!)))
+        (is (= (repeat 4 1)
                (-> (sql/delete conn :people {:id 4})
                    (norm/then (sql/delete conn :people {:id 5}))
                    (norm/then (sql/delete conn :people {:id 6}))
                    (norm/then (sql/delete conn :people {:id 7}))
-                   norm/execute)))
+                   norm/execute!)))
         (is (thrown? org.h2.jdbc.JdbcSQLSyntaxErrorException
                      (-> (sql/transaction conn
                                           (sql/delete nil :people {:name "Jane Doe"})
                                           (sql/insert nil :people {:first-name "John" :last-name "Doe"})
                                           (sql/select nil :people [:id :name] {:name "John Doe"}))
-                         norm/execute)))
+                         norm/execute!)))
         (is (= [{:id 2 :name "Jane Doe"}]
-               (-> (sql/select conn :people [:id :name] {:name "Jane Doe"}) norm/execute))
+               (-> (sql/select conn :people [:id :name] {:name "Jane Doe"}) norm/execute!))
             "Record must be present after failed transaction")))))
 
 (deftest relational-entity-test
@@ -130,32 +133,32 @@
     (let [person (sql/create-entity {:db conn} {:name :person, :table :people, :fields [:id :name :gender :birthday]})
           user (sql/create-entity {:db conn} {:name :user, :table :users, :fields [:id :login :role :active]})]
       (testing "creation"
-        (is (= {:id 1} (-> (norm/create person {:name "John Doe" :gender "male"}) norm/execute)))
-        (is (= {:id 2} (-> (norm/create person {:name "Jane Doe" :gender "female"}) norm/execute)))
-        (is (= {:id 1} (-> (norm/create user {:id 1 :login "john" :role "user"}) norm/execute))))
+        (is (= {:id 1} (-> (norm/create person {:name "John Doe" :gender "male"}) norm/execute!)))
+        (is (= {:id 2} (-> (norm/create person {:name "Jane Doe" :gender "female"}) norm/execute!)))
+        (is (= {:id 1} (-> (norm/create user {:id 1 :login "john" :role "user"}) norm/execute!))))
       (testing "fetching"
-        (is (= {:id 1 :name "John Doe" :gender "male"} (norm/fetch-by-id person 1)))
-        (is (= (merge norm/instance-meta {:entity person}) (-> (norm/fetch-by-id person 1) meta))
+        (is (= {:id 1 :name "John Doe" :gender "male"} (norm/fetch-by-id! person 1)))
+        (is (= (merge norm/instance-meta {:entity person}) (-> (norm/fetch-by-id! person 1) meta))
             "Metadata of an instance must contain an implementation of the `Instance `protocol and a reference to the entity.")
         (is (= [{:id 1 :name "John Doe" :gender "male"}
                 {:id 2 :name "Jane Doe" :gender "female"}]
-               (-> (norm/find person) fetch)))
-        (is (= [{:id 1 :name "John Doe" :gender "male"}] (-> (norm/find person {:id 1}) fetch))))
+               (-> (norm/find person) fetch!)))
+        (is (= [{:id 1 :name "John Doe" :gender "male"}] (-> (norm/find person {:id 1}) fetch!))))
       (testing "order"
         (is (= [{:id 2 :name "Jane Doe" :gender "female"}
                 {:id 1 :name "John Doe" :gender "male"}]
-               (-> (norm/find person {:birthday nil}) (order {:id :desc}) fetch))))
+               (-> (norm/find person {:birthday nil}) (order {:id :desc}) fetch!))))
       (testing "offset and limit"
         (is (= [{:id 2 :name "Jane Doe" :gender "female"}]
-               (-> (norm/find person {:birthday nil}) (order {:id :desc}) (skip  0) (limit 1) fetch)))
+               (-> (norm/find person {:birthday nil}) (order {:id :desc}) (skip  0) (limit 1) fetch!)))
         (is (= [{:id 1 :name "John Doe" :gender "male"}]
-               (-> (norm/find person {:birthday nil}) (order {:id :desc}) (skip 1) (limit 1) fetch))))
+               (-> (norm/find person {:birthday nil}) (order {:id :desc}) (skip 1) (limit 1) fetch!))))
       (testing "update"
-        (is (= {:next.jdbc/update-count 1} (-> (norm/update person {:name "Jane Love"} {:id 2}) norm/execute)))
-        (is (= {:id 2 :name "Jane Love" :gender "female"} (norm/fetch-by-id person 2)) "Entity must change after update."))
+        (is (= 1 (-> (norm/update person {:name "Jane Love"} {:id 2}) norm/execute!)))
+        (is (= {:id 2 :name "Jane Love" :gender "female"} (norm/fetch-by-id! person 2)) "Entity must change after update."))
       (testing "delete"
-        (is (= {:next.jdbc/update-count 1} (-> (norm/delete person {:id 2}) norm/execute)))
-        (is (nil? (norm/fetch-by-id person 2)) "Entity must be missing after delete."))
+        (is (= 1 (-> (norm/delete person {:id 2}) norm/execute!)))
+        (is (nil? (norm/fetch-by-id! person 2)) "Entity must be missing after delete."))
       (testing "with filter"
         (is (= (merge user {:filter {:active true}})
                (norm/with-filter user {:active true})))
@@ -296,12 +299,12 @@ WHERE er.employee_id IS NULL)"])
                      :user {:login "buzz.lightyear"
                             :active false
                             :person {:name "Buzz Lightyear"}}})
-                   norm/execute)))
-        (is (= {:id 4 :secret "sha256xxxx"} (norm/fetch-by-id (:user-secret repository) 4)))
+                   norm/execute!)))
+        (is (= {:id 4 :secret "sha256xxxx"} (norm/fetch-by-id! (:user-secret repository) 4)))
         (is (= {:id 4 :login "buzz.lightyear" :active false :person {:id 4 :name "Buzz Lightyear"}}
-               (norm/fetch-by-id (:user repository) 4))))
+               (norm/fetch-by-id! (:user repository) 4))))
       (testing "eager fetching"
-        (let [instance (norm/fetch-by-id (:user repository) 1)]
+        (let [instance (norm/fetch-by-id! (:user repository) 1)]
           (is (= {:id 1
                   :login "john.doe"
                   :active true
@@ -323,42 +326,52 @@ WHERE er.employee_id IS NULL)"])
                           :gender "female"}}]
                (-> (norm/find (:employee repository))
                    (where {:employee.person/name "Jane Doe"})
-                   fetch))
+                   fetch!))
             "Clause by related entity's fields must work."))
       (testing "filter by related entities without fetching"
-        (is (= [{:id 1, :secret "sha256(xxxxxxx)"}] (-> (norm/find (:user-secret repository) {:user/login "john.doe"}) fetch))))
+        (is (= [{:id 1, :secret "sha256(xxxxxxx)"}] (-> (norm/find (:user-secret repository) {:user/login "john.doe"}) fetch!))))
       (testing "fetching related entities"
         (is (= [{:id 1 :name "John Doe" :gender "male"}]
-               (-> (norm/find-related (:user repository) :person {:id 1}) fetch)
-               (-> (norm/find-related (:user repository) :person {:user/id 1}) fetch)
-               (-> (norm/find-related (:user repository) :person nil) (where {:user/id 1}) fetch)
-               (-> (norm/find-related (:user repository) :person {:person/name "John Doe"}) fetch)
-               (-> (norm/find-related (:user repository) :person {:user.person/name "John Doe"}) fetch)))
+               (-> (norm/find-related (:user repository) :person {:id 1}) fetch!)
+               (-> (norm/find-related (:user repository) :person {:user/id 1}) fetch!)
+               (-> (norm/find-related (:user repository) :person nil) (where {:user/id 1}) fetch!)
+               (-> (norm/find-related (:user repository) :person {:person/name "John Doe"}) fetch!)
+               (-> (norm/find-related (:user repository) :person {:user.person/name "John Doe"}) fetch!)))
         (is (= [{:id 3 :person-id 2 :type "email" :value "jane.doe@mailinator.com" :owner {:id 2 :name "Jane Doe" :gender "female"}}]
-               (-> (norm/find-related (:person repository) :contacts {:person/name "Jane Doe"}) fetch)))
+               (-> (norm/find-related (:person repository) :contacts {:person/name "Jane Doe"}) fetch!)))
         (is (= [{:id 1, :title "Cleaning", :active true} {:id 3, :title "Gardening", :active true}]
-               (-> (norm/find-related (:employee repository) :responsibilities {:id 1}) fetch)
-               (-> (norm/find-related (:employee repository) :nonresponsibilities {:id 2}) fetch)))
+               (-> (norm/find-related (:employee repository) :responsibilities {:id 1}) fetch!)
+               (-> (norm/find-related (:employee repository) :nonresponsibilities {:id 2}) fetch!)))
         (is (= [{:id 1 :salary 1500.0000M :active true :person {:id 1 :name "John Doe" :gender "male"}}]
-               (-> (norm/find-related (:responsibility repository) :employees {:id 1}) fetch)
-               (-> (norm/find-related (:responsibility repository) :employees {:id 3}) fetch)
-               (-> (norm/find-related (:responsibility repository) :nonemployees {:id 2}) fetch)))
+               (-> (norm/find-related (:responsibility repository) :employees {:id 1}) fetch!)
+               (-> (norm/find-related (:responsibility repository) :employees {:id 3}) fetch!)
+               (-> (norm/find-related (:responsibility repository) :nonemployees {:id 2}) fetch!)))
         (is (= [{:id 2 :supervisor-id 1 :salary 3000.0000M :active true :person {:id 2 :name "Jane Doe" :gender "female"}}]
-               (-> (norm/find-related (:employee repository) :subordinates {:id 1}) fetch)))
+               (-> (norm/find-related (:employee repository) :subordinates {:id 1}) fetch!)))
         (is (= [{:id 1 :salary 1500.0000M :active true :person {:id 1 :name "John Doe" :gender "male"}}]
-               (-> (norm/find-related (:employee repository) :supervisor {:id 2}) fetch)))
+               (-> (norm/find-related (:employee repository) :supervisor {:id 2}) fetch!)))
         (is (= [{:id 1 :name "John Doe" :gender "male"}]
-               (-> (norm/find-related (:contact repository) :owner {:value "john.doe@mailinator.com"}) fetch))
+               (-> (norm/find-related (:contact repository) :owner {:value "john.doe@mailinator.com"}) fetch!))
             "Filtering by a field of the main entity should work.")
         (is (= [{:id 1 :login "john.doe" :active true :person {:id 1 :name "John Doe" :gender "male"}}]
-               (-> (norm/find-related (:user-secret repository) :user {:user.person/name "John Doe"}) fetch))
+               (-> (norm/find-related (:user-secret repository) :user {:user.person/name "John Doe"}) fetch!))
             "Clause by a related entity's relation should join the source to the query."))
+      (testing "changing relations"
+        (is (= {:employee-id 1, :responsibility-id 2}
+               (norm/create-relation! (:employee repository) 1 :responsibilities 2)))
+        (is (= [{:id 1, :title "Cleaning", :active true} {:id 3, :title "Gardening", :active true} {:id 2, :title "Watering plants", :active true}]
+               (norm/find-related! (:employee repository) :responsibilities {:id 1}))
+            "Created relation should be found.")
+        (is (= 1 (norm/delete-relation! (:employee repository) 1 :responsibilities 2)))
+        (is (= [{:id 1, :title "Cleaning", :active true} {:id 3, :title "Gardening", :active true}]
+               (norm/find-related! (:employee repository) :responsibilities {:id 1}))
+            "Deleted relation should not be found."))
       (testing "fetch with filter"
         (is (= [{:id 1 :login "john.doe" :active true :person {:id 1, :name "John Doe", :gender "male"}}
                 {:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
-               (-> (:user repository) (norm/with-filter {:active true}) norm/find fetch)))
+               (-> (:user repository) (norm/with-filter {:active true}) norm/find fetch!)))
         (is (= [{:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
-               (-> (:user repository) (norm/with-filter {:active true}) (norm/find {:person/gender "female"}) fetch)))
+               (-> (:user repository) (norm/with-filter {:active true}) (norm/find {:person/gender "female"}) fetch!)))
         ))))
 
 (sql.specs/unstrument)
