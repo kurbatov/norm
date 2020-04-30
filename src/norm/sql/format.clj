@@ -18,9 +18,11 @@
    (or (namespace key) "")
    (str (when-let [n (namespace prefix)] (str n ".")) (name prefix))))
 
+(declare predicates)
+
 (defn ensure-prefixed [pfix coll]
   (walk/postwalk
-   #(if (and (keyword? %) (not (prefixed? pfix %)))
+   #(if (and (keyword? %) (not (contains? predicates %)) (not (prefixed? pfix %)))
       (prefix pfix %)
       %)
    coll))
@@ -51,8 +53,6 @@
       (str/join "/" ((juxt namespace name) x))
       (name x))
     x))
-
-(declare predicates)
 
 (defn format-field
   ([field]

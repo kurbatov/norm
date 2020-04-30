@@ -22,7 +22,9 @@
 (deftest ensure-prefixed-test
   (is (= {:user/id 1 :user/login "user"} (f/ensure-prefixed :user {:id 1 :login "user"})))
   (is (= {:user/id 1 :user.person/name "user"} (f/ensure-prefixed :user {:id 1 :person/name "user"})))
-  (is (= {:user/id 1 :user/login "user"} (f/ensure-prefixed :user {:user/id 1 :user/login "user"}))))
+  (is (= {:user/id 1 :user/login "user"} (f/ensure-prefixed :user {:user/id 1 :user/login "user"})))
+  (is (= {:or {:user/id 1 :user/login "user"}} (f/ensure-prefixed :user {:or {:id 1 :login "user"}}))
+      "Predicates should not be prefixed."))
 
 (deftest format-value-test
   (is (= "NULL" (f/format-value nil)))
