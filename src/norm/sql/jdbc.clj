@@ -63,6 +63,9 @@
                  (with-meta (merge instance-meta {:entity entity}))))))
   (rs! [this mrs] (persistent! mrs)))
 
+(defn cut-off-exclude [exclude v]
+  v)
+
 (defn get-column-names
   "Given `ResultSetMetaData`, return a vector of column names.
   Each column name is a vector of keywords itself.
@@ -75,7 +78,7 @@
     (->> (range 1 (inc (.getColumnCount rsmeta)))
          (map (fn [^Integer i] (.toLowerCase (.getColumnLabel rsmeta i) (Locale/US))))
          (map #(str/split % sep))
-         (map #(if (= exclude (subvec % 0 e-count)) (subvec % e-count) %))
+         (map #(if (and (>= (count %) e-count) (= exclude (subvec % 0 e-count))) (subvec % e-count) %))
          (mapv (partial mapv keyword)))))
 
 (defn as-entity-maps
