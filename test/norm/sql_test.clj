@@ -92,7 +92,9 @@
         (is (= 3 (-> (sql/select conn :people) fetch-count!)) "Database must contain all the inserted records."))
       (testing "of update"
         (is (= 1 (-> (sql/update conn :people {:gender "male"} {:id 1}) norm/execute!)))
-        (is (= [{:id 1 :gender "male"}] (-> (sql/select conn :people [:id :gender] {:id 1}) fetch!)) "Row must change after update."))
+        (is (= [{:id 1 :gender "male"}] (-> (sql/select conn :people [:id :gender] {:id 1}) fetch!)) "Row must change after update.")
+        (is (= 1 (-> (sql/update conn :people {:gender nil} {:id 1}) norm/execute!)))
+        (is (= [{:id 1 :gender nil}] (-> (sql/select conn :people [:id :gender] {:id 1}) fetch!)) "Property must change after update with nil."))
       (testing "of delete"
         (is (= 1 (-> (sql/delete conn :people {:id 1}) norm/execute!)))
         (is (= [{:id 2} {:id 3}] (-> (sql/select conn :people [:id]) fetch!)) "Deleted row must be missing from the table."))

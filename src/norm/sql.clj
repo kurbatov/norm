@@ -28,8 +28,8 @@
 
 (defmethod generate-sql-command :update [{:keys [target values where]}]
   (str "UPDATE " (f/format-target target)
-       " SET " (->> (keys values)
-                    (map #(str (f/format-field %) " = ?"))
+       " SET " (->> values
+                    (map #(str (f/format-field (key %)) " = " (f/format-value (val %))))
                     (str/join ", "))
        (when where (str " WHERE " (f/format-clause where)))))
 
