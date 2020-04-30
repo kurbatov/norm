@@ -281,17 +281,18 @@
                      (f/conjunct-clauses (f/ensure-prefixed name (:filter this))))
           relation-query (build-query entity (f/conjunct-clauses (:filter relation) r-where) true)
           base-query (build-query this where false)
+          join-table (:join-table relation)
           clause (condp = (:type relation)
                    :has-one {(f/prefix name pk) (f/prefix alias (:fk relation))}
                    :belongs-to {(f/prefix name (:fk relation)) (f/prefix alias (:pk entity))}
-                   :has-many (if (:join-table relation)
-                               {(f/prefix alias (:pk entity)) (f/prefix (:join-table relation) (:rfk relation))}
+                   :has-many (if join-table
+                               {(f/prefix alias (:pk entity)) (f/prefix join-table (:rfk relation))}
                                {(f/prefix name pk) (f/prefix alias (:fk relation))}))
-          r-source (if (:join-table relation)
-                     [(:source base-query) :left-join (:join-table relation) {(f/prefix name pk) (f/prefix (:join-table relation) (:fk relation))}]
+          r-source (if join-table
+                     [(:source base-query) :left-join join-table {(f/prefix name pk) (f/prefix join-table (:fk relation))}]
                      (:source base-query))]
       (-> relation-query
-          (assoc :source [(:source relation-query) :right-join r-source clause])
+          (assoc :source [(:source relation-query) (if join-table :right-join :left-join) r-source clause])
           (assoc :where (f/conjunct-clauses (:where relation-query) (:where base-query))))))
   (update [this patch where] (update (:db (meta this)) table patch where))
   (delete [this where] (delete (:db (meta this)) table where))

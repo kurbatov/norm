@@ -339,6 +339,7 @@ WHERE er.employee_id IS NULL)"])
                (-> (norm/find-related (:user repository) :person {:user.person/name "John Doe"}) fetch!)))
         (is (= [{:id 3 :person-id 2 :type "email" :value "jane.doe@mailinator.com" :owner {:id 2 :name "Jane Doe" :gender "female"}}]
                (-> (norm/find-related (:person repository) :contacts {:person/name "Jane Doe"}) fetch!)))
+        (is (= 0 (-> (norm/find-related (:person repository) :contacts {:id 3}) fetch-count!)))
         (is (= 2 (-> (norm/find-related (:employee repository) :responsibilities {:id 1}) fetch-count!)))
         (is (= [{:id 1, :title "Cleaning", :active true} {:id 3, :title "Gardening", :active true}]
                (-> (norm/find-related (:employee repository) :responsibilities {:id 1}) fetch!)
