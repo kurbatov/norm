@@ -1,7 +1,8 @@
 (ns norm.sql.format
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
-            [camel-snake-kebab.core :refer [->snake_case_string]]))
+            [camel-snake-kebab.core :refer [->snake_case_string]]
+            [norm.core :as core]))
 
 ;; Formatting
 
@@ -45,6 +46,7 @@
     (nil? x) "NULL"
     (boolean? x) x
     (keyword? x) (format-keyword-quoted x)
+    (satisfies? core/Query x) (wrap (str x))
     :else "?"))
 
 (defn format-alias [x]
@@ -177,16 +179,21 @@
 
 ;; Values
 
-(defn- extract-value [[_ v]]
+(declare extract-values)
+
+(defn- extract-value [v]
   (cond
     (map? v) (map extract-value v)
-    (and (coll? v) (keyword? (first v))) (rest v)
+    (and (coll? v) (keyword? (first v))) (->> (rest v) (mapv extract-value))
+    (satisfies? core/Query v) (cond-> (extract-values (:where v))
+                                (:limit v) (conj (:limit v))
+                                (:offset v) (conj (:offset v)))
     :else v))
 
 (defn extract-values [clause]
   (cond
     (map? clause) (->> clause
-                       (map extract-value)
+                       (map (comp extract-value val))
                        flatten
                        (filter some?)
                        (filter (complement boolean?))

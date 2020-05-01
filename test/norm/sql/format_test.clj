@@ -31,7 +31,9 @@
   (is (= "id" (f/format-value :id)))
   (is (= "\"user\".id" (f/format-value :user/id)))
   (is (= "?" (f/format-value 0)))
-  (is (= "?" (f/format-value "string"))))
+  (is (= "?" (f/format-value "string")))
+  (is (= "(SELECT id AS \"id\" FROM users AS \"users\" WHERE (role = ?))"
+         (f/format-value (sql/select nil :users [:id] {:role "admin"})))))
 
 (deftest format-alias-test
   (is (= "id" (f/format-alias :id)) "Alias unquoted.")
@@ -135,4 +137,6 @@
       (is (= [] (f/extract-values :users)))
       (is (= [] (f/extract-values [:users :user])))
       (is (= [] (f/extract-values [[:users :user] :left-join [:people :person] {:user/id :person/id}])))
-      (is (= ["John"] (f/extract-values [[:users :user] :left-join [:users :sub] {:user/id :sub/supervisor-id :user/name "John"}]))))))
+      (is (= ["John"] (f/extract-values [[:users :user] :left-join [:users :sub] {:user/id :sub/supervisor-id :user/name "John"}]))))
+    (testing "from sub-query"
+      (is (= ["admin" 20 60] (f/extract-values {:id [:in (sql/select nil :users [:id] {:role "admin"} {:id :asc} 20 60)]}))))))

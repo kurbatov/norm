@@ -33,7 +33,9 @@
     (is (= "SELECT \"user\".id AS \"user/id\", \"user\".name AS \"user/name\" FROM users AS \"user\" WHERE (\"user\".id = ?)"
            (str (sql/select nil [:users :user] [:user/id :user/name] {:user/id 1}))))
     (is (= "SELECT \"user\".id AS \"user/id\", \"person\".name AS \"person/name\" FROM (users AS \"user\" LEFT JOIN people AS \"person\" ON (\"user\".id = \"person\".id))"
-           (str (sql/select nil [[:users :user] :left-join [:people :person] {:user/id :person/id}] [:user/id :person/name])))))
+           (str (sql/select nil [[:users :user] :left-join [:people :person] {:user/id :person/id}] [:user/id :person/name]))))
+    (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\" FROM users AS \"user\" WHERE (\"user\".id IN ((SELECT user_id AS \"user-id\" FROM employees AS \"employees\" WHERE (active IS true))))"
+           (str (sql/select nil [:users :user] [:user/id :user/login] {:user/id [:in (sql/select nil :employees [:user-id] {:active true})]})))))
   (testing "Query parts amendment"
     (let [query (sql/select nil :users [:id :name])]
       (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" WHERE (id = ?)" (-> query (where {:id 1}) str)))
@@ -67,7 +69,11 @@
                 fetch!)))
         (is (= [{:id 1 :name "John Doe"} {:id 2 :name "Jane Doe"}] (-> query (where {:or {:id 1 :gender "female"}}) fetch!)))
         (is (= [{:id 1 :name "John Doe"} {:id 2 :name "Jane Doe"}] (-> query (order [:id]) fetch!)))
-        (is (= [{:id 2 :name "Jane Doe"} {:id 1 :name "John Doe"}] (-> query (order {:id :desc}) fetch!)))))))
+        (is (= [{:id 2 :name "Jane Doe"} {:id 1 :name "John Doe"}] (-> query (order {:id :desc}) fetch!)))
+        (testing "with sub-query"
+          (is (= [{:person/id 1, :person/name "John Doe"}]
+                 (-> (select [:people :person] [:person/id :person/name] {:person/id [:in (select :users [:users/id] {:users/login "john.doe"})]})
+                     fetch!))))))))
 
 (deftest sql-command-test
   (testing "Insert command building"

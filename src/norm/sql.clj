@@ -180,7 +180,7 @@
 
 (defn- build-query [entity where with-eager-fetch]
   (let [{:keys [name table pk]} entity
-        repository @(:repository (meta entity) (delay {}))
+        repository @(or (:repository (meta entity)) (delay {}))
         relations (->> (:relations entity)
                        (filter (comp (partial contains? repository) :entity val))
                        (map (fn [[k v]] [(f/prefix name k) v]))
@@ -208,9 +208,10 @@
                                clause (condp = (:type v)
                                         :has-one {(f/prefix name pk) (f/prefix k (:fk v))}
                                         :belongs-to {(f/prefix name (:fk v)) (f/prefix k (:pk r-entity))}
-                                        :has-many (-> (str "Filtering by property of a :has-many relation (" k ") is not supported")
-                                                      IllegalArgumentException.
-                                                      throw))]
+                                        (-> (str "Filtering " name " by property of " k " is not supported.\n"
+                                                 "Filtering by property of a relation is supported for :has-one and :belongs-to relations only.")
+                                            IllegalArgumentException.
+                                            throw))]
                            [left-src :left-join [(:table r-entity) k] clause]))
                        [table name]
                        (merge eager implicit-rels))]
@@ -294,8 +295,9 @@
       (-> relation-query
           (assoc :source [(:source relation-query) (if join-table :right-join :left-join) r-source clause])
           (assoc :where (f/conjunct-clauses (:where relation-query) (:where base-query))))))
-  (update [this patch where] (update (:db (meta this)) table patch where))
-  (delete [this where] (delete (:db (meta this)) table where))
+  (update [this patch where]
+    (update (:db (meta this)) table patch (f/conjunct-clauses (:filter this) where)))
+  (delete [this where] (delete (:db (meta this)) table (f/conjunct-clauses (:filter this) where)))
   (create-relation [this id relation-key rel-id]
     (let [{:keys [db repository]} (meta this)
           repository @(or repository (delay {}))
