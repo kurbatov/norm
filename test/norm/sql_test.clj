@@ -5,8 +5,6 @@
             [norm.sql :as sql]
             [norm.sql.specs :as sql.specs]))
 
-(sql.specs/instrument)
-
 (deftest sql-query-test
   (testing "Query building"
     (is (= "SELECT * FROM users AS \"users\"" (str (sql/select nil :users))))
@@ -247,6 +245,7 @@
                                                :filter {:active true}}}}})
 
 (deftest create-repository-test
+  (sql.specs/instrument)
   (with-open [conn (jdbc/get-connection {:dbtype "h2:mem"})]
     (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL, name VARCHAR(100), gender VARCHAR(10), birthday DATE)"])
     (jdbc/execute! conn ["CREATE TABLE contacts (id BIGSERIAL, person_id BIGINT, type VARCHAR(32), value VARCHAR(128))"])
@@ -366,6 +365,14 @@ WHERE er.employee_id IS NULL)"])
         (is (= [{:id 1 :login "john.doe" :active true :person {:id 1 :name "John Doe" :gender "male"}}]
                (-> (norm/find-related (:user-secret repository) :user {:user.person/name "John Doe"}) fetch!))
             "Clause by a related entity's relation should join the source to the query."))
+      (testing "updating with embedded entities"
+        (is (= 1 (norm/update! (:user repository) {:person {:name "Buzz"}} {:id 4})))
+        (is (= {:id 4 :name "Buzz"} (norm/fetch-by-id! (:person repository) 4))
+            "Updating of an embedded entity must change the entity.")
+        (is (= 2 (norm/update! (:user repository) {:role "user" :person {:name "Buzz Lightyear"}} {:id 4})))
+        (is (= {:id 4 :login "buzz.lightyear" :role "user" :active false :person {:id 4, :name "Buzz Lightyear"}}
+               (norm/fetch-by-id! (:user repository) 4))
+            "Updating with an embedded entity must change both the main and embedded entity."))
       (testing "changing relations"
         (is (= {:employee-id 1, :responsibility-id 2}
                (norm/create-relation! (:employee repository) 1 :responsibilities 2)))
@@ -382,6 +389,5 @@ WHERE er.employee_id IS NULL)"])
                (-> (:user repository) (norm/with-filter {:active true}) norm/find fetch!)))
         (is (= [{:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
                (-> (:user repository) (norm/with-filter {:active true}) (norm/find {:person/gender "female"}) fetch!)))
-        ))))
-
-(sql.specs/unstrument)
+        )))
+  (sql.specs/unstrument))

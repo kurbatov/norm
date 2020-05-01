@@ -1,13 +1,14 @@
 (ns norm.sql
-  (:refer-clojure :exclude [find update remove select])
+  (:refer-clojure :exclude [find update remove])
   (:require [clojure.string :as str]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]
             [camel-snake-kebab.core :refer [->kebab-case-keyword]]
+            [clojure.spec.test.alpha :as st]
             [norm.core :as core :refer [where create-repository]]
             [norm.sql.format :as f]
             [norm.sql.jdbc :refer [as-entity-maps]]
-            [norm.util :refer [flatten-map]])
+            [norm.util :refer [flatten-map meta?]])
   (:import [norm.core Command Query]))
 
 (def default-jdbc-opts
@@ -66,9 +67,11 @@
             result (cond-> (core/execute! command)
                      (:tx-result (meta command)) (vary-meta assoc :tx-result true))]
         (recur (conj results result) (rest commands)))
-      (if-let [tx-result (->> results (filter (comp :tx-result meta)) first)]
-        (vary-meta tx-result dissoc :tx-result)
-        results))))
+      (if-let [tx-result-fn (:tx-result-fn (meta transaction))]
+        (tx-result-fn results)
+        (if-let [tx-result (->> results (filter (comp :tx-result meta)) first)]
+          (vary-meta tx-result dissoc :tx-result)
+          results)))))
 
 (def sql-command-meta
   {`core/execute! (fn execute-command [command]
@@ -81,8 +84,8 @@
                                     (jdbc/with-transaction [tx db] (execute-transaction tx command)))
                                   (or (execute-sql-command command) default-result))]
                      (cond-> result
-                       entity (vary-meta assoc :entity entity )
-                       relation (vary-meta assoc :relation relation)
+                       (and (meta? result) entity)          (vary-meta assoc :entity entity )
+                       (and (meta? result) relation)        (vary-meta assoc :relation relation)
                        (#{:update :delete} (:type command)) :next.jdbc/update-count)))
    `core/then (fn then [command next-command]
                 (if next-command
@@ -246,23 +249,27 @@
                                (insert db table))))
           create-this (cond-> (vary-meta create-this assoc :entity this)
                         (not-empty embedded-rels) (vary-meta assoc :tx-result true))
-          create-dependents (map (fn [[k v]]
-                                   (let [entity ((:entity v) repository)
-                                         instance (k data)]
-                                     (if (pk data)
-                                       (core/create entity (assoc instance (:fk v) (pk data)))
-                                       (fn create-dependent [results]
-                                         (->> (nth results owner-idx)
-                                              pk
-                                              (assoc instance (:fk v))
-                                              (core/create entity))))))
-                                 dependents)]
+          create-dependents (->> dependents
+                                 (map (fn [[k v]]
+                                        (let [entity ((:entity v) repository)
+                                              instance (k data)]
+                                          (if (pk data)
+                                            (core/create entity (assoc instance (:fk v) (pk data)))
+                                            (fn create-dependent [results]
+                                              (->> (nth results owner-idx)
+                                                   pk
+                                                   (assoc instance (:fk v))
+                                                   (core/create entity)))))))
+                                 (map #(vary-meta % assoc :tx-propagation true)))]
       (if (empty? embedded-rels)
         create-this
-        (apply core/then create-dependencies create-this create-dependents))))
+        (-> create-dependencies
+            (core/then create-this)
+            (into create-dependents)))))
   (fetch-by-id! [this id] (-> (core/find! this {(or pk :id) id}) first))
   (find [this] (core/find this nil))
   (find [this where] (build-query this where true))
+  (find [this fields where] (build-query (assoc this :fields fields) where false))  
   (find-related [this relation-key where]
     (let [relation (or (relation-key relations)
                        (-> (str "Relation " relation-key " does not exist in " name ". Try one of the following " (keys relations))
@@ -296,7 +303,50 @@
           (assoc :source [(:source relation-query) (if join-table :right-join :left-join) r-source clause])
           (assoc :where (f/conjunct-clauses (:where relation-query) (:where base-query))))))
   (update [this patch where]
-    (update (:db (meta this)) table patch (f/conjunct-clauses (:filter this) where)))
+    (let [{:keys [db repository]} (meta this)
+          repository @(or repository (delay {}))
+          present-keys (set (keys patch))
+          embedded-rels (->> relations (filter (comp present-keys key)))
+          belongs-to-rels (->> embedded-rels (filter (comp (partial = :belongs-to) :type val)))
+          initial-select (when (not-empty embedded-rels)
+                           (->> belongs-to-rels
+                                (map (comp :fk val))
+                                (into [pk])
+                                (#(core/find this % (f/conjunct-clauses (:filter this) where)))))
+          dependencies (->> belongs-to-rels
+                            (map (fn [[k v]]
+                                   (let [entity ((:entity v) repository)
+                                         pk (:pk entity)
+                                         patch (dissoc (k patch) pk)
+                                         fk (:fk v)]
+                                     (fn [results]
+                                       (let [ids (->> (first results) (map fk) set)
+                                             ids (if (= 1 (count ids)) (first ids) (into [] ids))]
+                                         (core/update entity patch {pk ids}))))))
+                            (map #(vary-meta % assoc :tx-propagation true)))
+          dependents (->> embedded-rels
+                          (filter (comp (partial = :has-one) :type val))
+                          (map (fn [[k v]]
+                                 (let [{:keys [entity fk]} v
+                                       entity (entity repository)
+                                       patch (dissoc (k patch) (:pk entity))]
+                                   (fn [results]
+                                     (let [ids (->> (first results) (map pk) set)
+                                           ids (if (= 1 (count ids)) (first ids) (into [] ids))]
+                                       (core/update entity patch {fk ids}))))))
+                          (map #(vary-meta % assoc :tx-propagation true)))
+          instance (apply dissoc patch (map key embedded-rels))
+          base-command (when (not-empty instance)
+                         (if (empty? embedded-rels)
+                           (update db table instance (f/conjunct-clauses (:filter this) where))
+                           #(update db table instance {pk (->> (first %) (mapv pk))})))]
+      (if (empty? embedded-rels)
+        base-command
+        (cond-> [initial-select]
+          true (with-meta (assoc sql-command-meta :db db :entity this :tx-result-fn (comp (partial reduce +) (partial drop 1))))
+          (not-empty dependencies) (into dependencies)
+          (some? base-command) (conj base-command)
+          (not-empty dependents) (into dependents)))))
   (delete [this where] (delete (:db (meta this)) table (f/conjunct-clauses (:filter this) where)))
   (create-relation [this id relation-key rel-id]
     (let [{:keys [db repository]} (meta this)
@@ -357,3 +407,5 @@
          (#(with-meta % opts))
          (deliver (:repository entity-meta))
          deref)))
+
+(st/instrument `create-entity)

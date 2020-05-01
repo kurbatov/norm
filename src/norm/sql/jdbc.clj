@@ -63,9 +63,6 @@
                  (with-meta (merge instance-meta {:entity entity}))))))
   (rs! [this mrs] (persistent! mrs)))
 
-(defn cut-off-exclude [exclude v]
-  v)
-
 (defn get-column-names
   "Given `ResultSetMetaData`, return a vector of column names.
   Each column name is a vector of keywords itself.

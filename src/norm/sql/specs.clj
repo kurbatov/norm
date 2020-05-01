@@ -110,12 +110,54 @@
 
 (s/def ::fk keyword?)
 
+(s/def ::rfk keyword?)
+
 (s/def ::join-table keyword?)
 
 (s/def ::filter ::clause)
 
-(s/def ::relation (s/keys :req-un [:rel/entity ::type ::fk]
-                          :opt-un [::join-table ::filter]))
+(s/def ::eager boolean?)
+
+(s/def ::rel-required (s/keys :req-un [:rel/entity ::type ::fk]))
+
+(s/def ::belongs-to-rel
+  (s/and
+   ::rel-required
+   (s/keys ::opt-un [::eager])
+   (comp (partial = :belongs-to) :type)
+   #(not (contains? % :filter))
+   #(not (contains? % :join-table))
+   #(not (contains? % :rfk))))
+
+(s/def ::has-one-rel
+  (s/and
+   ::rel-required
+   (s/keys ::opt-un [::eager])
+   (comp (partial = :has-one) :type)
+   #(not (contains? % :filter))
+   #(not (contains? % :join-table))
+   #(not (contains? % :rfk))))
+
+(s/def ::has-many-to-one-rel
+  (s/and
+   ::rel-required
+   (comp (partial = :has-many) :type)
+   #(not (contains? % :eager))
+   #(not (contains? % :join-table))
+   #(not (contains? % :rfk))
+   (s/keys :opt-un [::filter])))
+
+(s/def ::has-many-to-many-rel
+  (s/and
+   ::rel-required
+   (s/keys :req-un [::join-table ::rfk]
+           :opt-un [::filter])
+   #(not (contains? % :eager))))
+
+(s/def ::relation (s/or :belongs-to   ::belongs-to-rel
+                        :has-one      ::has-one-rel
+                        :many-to-one  ::has-many-to-one-rel
+                        :many-to-many ::has-many-to-many-rel))
 
 (s/def ::relations (s/map-of keyword? ::relation))
 

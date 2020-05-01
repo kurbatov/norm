@@ -10,3 +10,8 @@
         (recur (concat h tail) out)
         (recur tail (conj out h)))
       out)))
+
+(defn meta?
+  "Checks if the argument can have meta-data attached"
+  [x]
+  (instance? clojure.lang.IObj x))

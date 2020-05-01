@@ -146,12 +146,20 @@
 (defprotocol Entity
   "A persistent entity."
   :extend-via-metadata true
-  (create ^Command [entity data] "Builds a command that creates a new instance of the entity in the storage when executed.")
-  (fetch-by-id! [entity id] "Fetches an instance of the entity with specified id from the storage immediately.")
-  (find ^Query [entity] ^Query [entity where] "Builds a query that provides instances of the entity when fetched.")
-  (find-related ^Query [entity relation where] "Builds a query that provides instances of the related entity when fetched.")
-  (update ^Command [entity patch where] "Builds a command that updates state of entities in the storage when executed.")
-  (delete ^Command [entity where] "Builds a command that deletes entities from the storage when executed.")
+  (create ^Command [entity data]
+    "Builds a command that creates a new instance of the entity in the storage when executed.
+    `data` may contain data for related entities.")
+  (fetch-by-id! [entity id]
+    "Fetches an instance of the entity with specified id from the storage immediately.")
+  (find ^Query [entity] ^Query [entity where] ^Query [entity fields where]
+    "Builds a query that provides instances of the entity when fetched.")
+  (find-related ^Query [entity relation where]
+    "Builds a query that provides instances of the related entity when fetched.")
+  (update ^Command [entity patch where]
+    "Builds a command that updates state of entities in the storage when executed.
+    `patch` may contain data for related entities.")
+  (delete ^Command [entity where]
+    "Builds a command that deletes entities from the storage when executed.")
   (create-relation ^Command [entity id relation rel-id]
     "Builds a command that creates relation between exesting entities when executed.")
   (delete-relation ^Command [entity id relation rel-id]
@@ -196,7 +204,8 @@
 (defn find!
   "Finds and fetches instances of the entity immediately."
   ([entity] (-> (find entity) fetch!))
-  ([entity where] (-> (find entity where) fetch!)))
+  ([entity where] (-> (find entity where) fetch!))
+  ([entity fields where] (-> (find entity fields where) fetch!)))
 
 (defn find-related!
   "Finds and fetches instances of the related entity immediately."
