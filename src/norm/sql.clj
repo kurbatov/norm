@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]
+            [next.jdbc.date-time]
             [camel-snake-kebab.core :refer [->kebab-case-keyword]]
             [clojure.spec.test.alpha :as st]
             [norm.core :as core :refer [where create-repository]]
@@ -191,33 +192,30 @@
         eager (when with-eager-fetch
                 (->> relations
                      (filter (comp :eager val))
-                     (filter (comp #{:has-one :belongs-to} :type val))
-                     (into {})))
+                     (filter (comp #{:has-one :belongs-to} :type val))))
         fields (reduce (fn [result [k v]]
                          (->> (:fields ((:entity v) repository))
                               (map (partial f/prefix k))
                               (into result)))
-                       (mapv (partial f/prefix name) (:fields entity))
+                       (f/ensure-prefixed name (:fields entity))
                        eager)
         where (f/conjunct-clauses
                (f/ensure-prefixed name (:filter entity))
                (f/ensure-prefixed name where))
-        ks (->> (flatten-map where) (filter keyword?))
-        implicit-rels (->> (apply dissoc relations (keys eager))
-                           (filter #(some (partial f/prefixed? (key %)) ks))
-                           (into {}))
-        source (reduce (fn [left-src [k v]]
-                         (let [r-entity ((:entity v) repository)
-                               clause (condp = (:type v)
-                                        :has-one {(f/prefix name pk) (f/prefix k (:fk v))}
-                                        :belongs-to {(f/prefix name (:fk v)) (f/prefix k (:pk r-entity))}
-                                        (-> (str "Filtering " name " by property of " k " is not supported.\n"
-                                                 "Filtering by property of a relation is supported for :has-one and :belongs-to relations only.")
-                                            IllegalArgumentException.
-                                            throw))]
-                           [left-src :left-join [(:table r-entity) k] clause]))
-                       [table name]
-                       (merge eager implicit-rels))]
+        ks (->> (flatten-map where) (filter keyword?) (concat fields))
+        source (->> relations
+                    (filter #(some (partial f/prefixed? (key %)) ks))
+                    (reduce (fn [left-src [k v]]
+                              (let [r-entity ((:entity v) repository)
+                                    clause (condp = (:type v)
+                                             :has-one {(f/prefix name pk) (f/prefix k (:fk v))}
+                                             :belongs-to {(f/prefix name (:fk v)) (f/prefix k (:pk r-entity))}
+                                             (-> (str "Filtering " name " by (or eager fetching a) property of " k " is not supported.\n"
+                                                      "Eager fetching and filtering by property of a relation is supported for :has-one and :belongs-to relations only.")
+                                                 IllegalArgumentException.
+                                                 throw))]
+                                [left-src :left-join [(:table r-entity) k] clause]))
+                            [table name]))]
     (select (:db (meta entity)) source fields where nil nil nil {:builder-fn as-entity-maps :entity entity})))
 
 (defrecord RelationalEntity [name table pk fields relations]

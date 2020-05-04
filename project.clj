@@ -4,7 +4,7 @@
   :license {:name "MIT License"
             :url "https://opensource.org/licenses/MIT"}
   :dependencies [[org.clojure/clojure "1.10.1"]
-                 [seancorfield/next.jdbc "1.0.409"]
+                 [seancorfield/next.jdbc "1.0.424"]
                  [camel-snake-kebab "0.4.1"]]
   :repl-options {:init-ns norm.core
                  :caught  clojure.stacktrace/print-stack-trace}

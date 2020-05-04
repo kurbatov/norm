@@ -297,7 +297,10 @@ WHERE er.employee_id IS NULL)"])
         (is (= "SELECT \"employee\".id AS \"employee/id\", \"employee\".supervisor_id AS \"employee/supervisor-id\", \"employee\".salary AS \"employee/salary\", \"employee\".active AS \"employee/active\", \"employee.person\".id AS \"employee.person/id\", \"employee.person\".name AS \"employee.person/name\", \"employee.person\".gender AS \"employee.person/gender\", \"employee.person\".birthday AS \"employee.person/birthday\" FROM (employees AS \"employee\" LEFT JOIN people AS \"employee.person\" ON (\"employee\".id = \"employee.person\".id)) WHERE (\"employee.person\".name = ?)"
                (-> (norm/find (:employee repository) {:person/name "Jane Doe"}) str)
                (-> (norm/find (:employee repository) {:employee.person/name "Jane Doe"}) str)
-               (-> (norm/find (:employee repository)) (where {:employee.person/name "Jane Doe"}) str))))
+               (-> (norm/find (:employee repository)) (where {:employee.person/name "Jane Doe"}) str)))
+        (is (= "SELECT \"user\".login AS \"user/login\", \"user.person\".name AS \"user.person/name\" FROM (users AS \"user\" LEFT JOIN people AS \"user.person\" ON (\"user\".id = \"user.person\".id)) WHERE (\"user\".id = ?)"
+               (str (norm/find (:user repository) [:user/login :person/name] {:id 1}))
+               (str (norm/find (:user repository) [:login :person/name] {:user/id 1})))))
       (testing "creation with embedded entities"
         (is (= {:id 4}
                (-> (norm/create
@@ -335,6 +338,8 @@ WHERE er.employee_id IS NULL)"])
                    (where {:employee.person/name "Jane Doe"})
                    fetch!))
             "Clause by related entity's fields must work."))
+      (testing "fetching fields of related entities"
+        (is (= [{:login "john.doe", :person {:name "John Doe"}}] (norm/find! (:user repository) [:user/login :person/name] {:id 1}))))
       (testing "filter by related entities without fetching"
         (is (= [{:id 1, :secret "sha256(xxxxxxx)"}] (-> (norm/find (:user-secret repository) {:user/login "john.doe"}) fetch!))))
       (testing "fetching related entities"
