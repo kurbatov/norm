@@ -306,11 +306,16 @@
           present-keys (set (keys patch))
           embedded-rels (->> relations (filter (comp present-keys key)))
           belongs-to-rels (->> embedded-rels (filter (comp (partial = :belongs-to) :type val)))
-          initial-select (when (not-empty embedded-rels)
+          rel-keys (keys relations)
+          filtered-by-rel (->> (flatten-map where)
+                               (filter keyword?)
+                               (concat (->> (flatten-map (:filter this)) (filter keyword?)))
+                               (some (fn [x] (some #(f/prefixed? % x) rel-keys))))
+          initial-select (when (or (not-empty embedded-rels) filtered-by-rel)
                            (->> belongs-to-rels
                                 (map (comp :fk val))
                                 (into [pk])
-                                (#(core/find this % (f/conjunct-clauses (:filter this) where)))))
+                                (#(core/find this % where))))
           dependencies (->> belongs-to-rels
                             (map (fn [[k v]]
                                    (let [entity ((:entity v) repository)
@@ -335,16 +340,16 @@
                           (map #(vary-meta % assoc :tx-propagation true)))
           instance (apply dissoc patch (map key embedded-rels))
           base-command (when (not-empty instance)
-                         (if (empty? embedded-rels)
-                           (update db table instance (f/conjunct-clauses (:filter this) where))
-                           #(update db table instance {pk (->> (first %) (mapv pk))})))]
-      (if (empty? embedded-rels)
-        base-command
+                         (if initial-select
+                           #(update db table instance {pk (->> (first %) (mapv pk))})
+                           (update db table instance (f/conjunct-clauses (:filter this) where))))]
+      (if initial-select
         (cond-> [initial-select]
           true (with-meta (assoc sql-command-meta :db db :entity this :tx-result-fn (comp (partial reduce +) (partial drop 1))))
           (not-empty dependencies) (into dependencies)
           (some? base-command) (conj base-command)
-          (not-empty dependents) (into dependents)))))
+          (not-empty dependents) (into dependents))
+        base-command)))
   (delete [this where] (delete (:db (meta this)) table (f/conjunct-clauses (:filter this) where)))
   (create-relation [this id relation-key rel-id]
     (let [{:keys [db repository]} (meta this)

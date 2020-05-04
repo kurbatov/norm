@@ -370,7 +370,7 @@ WHERE er.employee_id IS NULL)"])
         (is (= [{:id 1 :login "john.doe" :active true :person {:id 1 :name "John Doe" :gender "male"}}]
                (-> (norm/find-related (:user-secret repository) :user {:user.person/name "John Doe"}) fetch!))
             "Clause by a related entity's relation should join the source to the query."))
-      (testing "updating with embedded entities"
+      (testing "update with embedded entities"
         (is (= 1 (norm/update! (:user repository) {:person {:name "Buzz"}} {:id 4})))
         (is (= {:id 4 :name "Buzz"} (norm/fetch-by-id! (:person repository) 4))
             "Updating of an embedded entity must change the entity.")
@@ -378,6 +378,11 @@ WHERE er.employee_id IS NULL)"])
         (is (= {:id 4 :login "buzz.lightyear" :role "user" :active false :person {:id 4, :name "Buzz Lightyear"}}
                (norm/fetch-by-id! (:user repository) 4))
             "Updating with an embedded entity must change both the main and embedded entity."))
+      (testing "update filtered by relationship"
+        (is (= 1 (norm/update! (:user repository) {:login "buzz"} {:person/name "Buzz Lightyear"})))
+        (is (= {:id 4 :login "buzz" :role "user" :active false :person {:id 4, :name "Buzz Lightyear"}}
+               (norm/fetch-by-id! (:user repository) 4))
+            "Update with filtering by related entity must change the main entity."))
       (testing "changing relations"
         (is (= {:employee-id 1, :responsibility-id 2}
                (norm/create-relation! (:employee repository) 1 :responsibilities 2)))
