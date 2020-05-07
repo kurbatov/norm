@@ -104,6 +104,8 @@
 
 (s/def ::table keyword?)
 
+(s/def ::fields (s/coll-of keyword?))
+
 (s/def :rel/entity keyword?)
 
 (s/def ::type #{:belongs-to :has-one :has-many})
@@ -162,9 +164,18 @@
 (s/def ::relations (s/map-of keyword? ::relation))
 
 (s/def ::entity (s/keys :req-un [::table]
-                        :opt-un [::pk ::relations ::filter]))
+                        :opt-un [::pk ::fields ::relations ::filter]))
 
 (s/def ::repository (s/map-of keyword? ::entity))
+
+(s/def :meta/db any?)
+
+(s/def :meta/repository any?)
+
+(s/def :meta/schema string?)
+
+(s/def ::entity-meta (s/keys :req-un [:meta/db :meta/repository]
+                             :opt-un [:meta/schema]))
 
 (s/fdef sql/create-entity
   :args (s/cat :meta map? :entity ::entity))

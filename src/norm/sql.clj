@@ -387,14 +387,15 @@
 ;; SQL repository
 
 (defn create-entity [entity-meta entity]
-  (let [fields (->> (select (:db entity-meta)
+  (let [fields (or
+                (:fields entity)
+                (->> (select (:db entity-meta)
                             :information-schema/columns
                             [:column-name]
-                            {:table-schema [:ilike "public"] ;TODO get default schema from DB
+                            {:table-schema [:ilike (:schema entity-meta "public")]
                              :table-name   [:ilike (f/format-keyword (:table entity))]})
                     core/fetch!
-                    (mapv (comp ->kebab-case-keyword :column-name)))
-        fields (if (empty? fields) (:fields entity fields) fields)]
+                    (mapv (comp ->kebab-case-keyword :column-name))))]
     (-> entity
         (assoc :pk (:pk entity :id))
         (assoc :fields fields)
