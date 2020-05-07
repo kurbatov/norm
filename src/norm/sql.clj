@@ -393,7 +393,8 @@
              (not join-table))            (core/update entity {fk nil} {(:pk entity) rel-id, fk id})
         (and (= :has-many type)
              join-table)                  (delete db join-table {fk id, rfk rel-id}))))
-  (with-filter [this where] (assoc this :filter where))
+  (with-filter [this where]
+    (assoc this :filter (f/conjunct-clauses (:filter this) where)))
   (with-relations [this new-relations]
     (-> (RelationalEntity. name table pk fields (merge relations new-relations))
         (with-meta (meta this))))

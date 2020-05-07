@@ -166,12 +166,20 @@
         (is (= 1 (-> (norm/delete person {:id 2}) norm/execute!)))
         (is (nil? (norm/fetch-by-id! person 2)) "Entity must be missing after delete."))
       (testing "with filter"
-        (is (= (merge user {:filter {:active true}})
-               (norm/with-filter user {:active true})))
-        (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\", \"user\".role AS \"user/role\", \"user\".active AS \"user/active\" FROM users AS \"user\" WHERE (\"user\".active IS true)"
-               (-> (norm/with-filter user {:active true}) norm/find str)))
-        (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\", \"user\".role AS \"user/role\", \"user\".active AS \"user/active\" FROM users AS \"user\" WHERE ((\"user\".active IS true) AND (\"user\".id = ?))"
-               (-> (norm/with-filter user {:active true}) (norm/find {:id 1}) str))))
+        (let [active-user (norm/with-filter user {:active true})
+              active-admin (norm/with-filter active-user {:role "admin"})]
+          (is (= (merge user {:filter {:active true}})
+                 active-user))
+          (is (= (merge user {:filter '(and {:active true} {:role "admin"})})
+                 active-admin))
+          (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\", \"user\".role AS \"user/role\", \"user\".active AS \"user/active\" FROM users AS \"user\" WHERE (\"user\".active IS true)"
+                 (-> active-user norm/find str)))
+          (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\", \"user\".role AS \"user/role\", \"user\".active AS \"user/active\" FROM users AS \"user\" WHERE ((\"user\".active IS true) AND (\"user\".id = ?))"
+                 (-> active-user (norm/find {:id 1}) str)))
+          (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\", \"user\".role AS \"user/role\", \"user\".active AS \"user/active\" FROM users AS \"user\" WHERE ((\"user\".active IS true) AND (\"user\".role = ?))"
+                 (-> active-admin norm/find str)))
+          (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\", \"user\".role AS \"user/role\", \"user\".active AS \"user/active\" FROM users AS \"user\" WHERE (((\"user\".active IS true) AND (\"user\".role = ?)) AND (\"user\".id = ?))"
+                 (-> active-admin (norm/find {:id 1}) str)))))
       (testing "mutating an entity"
         (is (= (merge user {:relations {:secret {:entity :secret
                                                  :type :has-one
