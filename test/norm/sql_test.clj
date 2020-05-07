@@ -398,6 +398,8 @@ WHERE er.employee_id IS NULL)"])
                 {:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
                (-> (:user repository) (norm/with-filter {:active true}) norm/find fetch!)))
         (is (= [{:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
-               (-> (:user repository) (norm/with-filter {:active true}) (norm/find {:person/gender "female"}) fetch!)))
-        )))
+               (-> (:user repository) (norm/with-filter {:active true}) (norm/find {:person/gender "female"}) fetch!))))
+      (testing "delete by related entity"
+        (is (= 1 (norm/delete! (:user repository) {:person/name "Buzz Lightyear"})))
+        (is (nil? (norm/fetch-by-id! (:user repository) 4)) "Deleted entity must not be found."))))
   (sql.specs/unstrument))

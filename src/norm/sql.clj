@@ -59,19 +59,19 @@
 
 (defn- execute-transaction [tx transaction]
   (loop [results []
-         commands transaction]
+         commands transaction
+         tx-result nil]
     (if (not-empty commands)
       (let [command (-> (first commands) (vary-meta assoc :db tx))
             command (if (fn? command)
                       (-> (command results) (vary-meta merge (meta command)))
                       command)
-            result (cond-> (core/execute! command)
-                     (:tx-result (meta command)) (vary-meta assoc :tx-result true))]
-        (recur (conj results result) (rest commands)))
+            result (core/execute! command)]
+        (recur (conj results result) (rest commands) (if (:tx-result (meta command)) result tx-result)))
       (if-let [tx-result-fn (:tx-result-fn (meta transaction))]
         (tx-result-fn results)
-        (if-let [tx-result (->> results (filter (comp :tx-result meta)) first)]
-          (vary-meta tx-result dissoc :tx-result)
+        (if tx-result
+          tx-result
           results)))))
 
 (def sql-command-meta
@@ -218,6 +218,13 @@
                             [table name]))]
     (select (:db (meta entity)) source fields where nil nil nil {:builder-fn as-entity-maps :entity entity})))
 
+(defn- filtered-by-rel
+  "Determines if the `clause` map contains a keyword prefixed by one of `rel-keys`."
+  [clause rel-keys]
+  (->> (flatten-map clause)
+       (filter keyword?)
+       (some (fn [x] (some #(f/prefixed? % x) rel-keys)))))
+
 (defrecord RelationalEntity [name table pk fields relations]
   core/Entity
   (create [this data]
@@ -307,11 +314,9 @@
           embedded-rels (->> relations (filter (comp present-keys key)))
           belongs-to-rels (->> embedded-rels (filter (comp (partial = :belongs-to) :type val)))
           rel-keys (keys relations)
-          filtered-by-rel (->> (flatten-map where)
-                               (filter keyword?)
-                               (concat (->> (flatten-map (:filter this)) (filter keyword?)))
-                               (some (fn [x] (some #(f/prefixed? % x) rel-keys))))
-          initial-select (when (or (not-empty embedded-rels) filtered-by-rel)
+          initial-select (when (or (not-empty embedded-rels)
+                                   (filtered-by-rel (:filter this) rel-keys)
+                                   (filtered-by-rel where rel-keys))
                            (->> belongs-to-rels
                                 (map (comp :fk val))
                                 (into [pk])
@@ -350,7 +355,20 @@
           (some? base-command) (conj base-command)
           (not-empty dependents) (into dependents))
         base-command)))
-  (delete [this where] (delete (:db (meta this)) table (f/conjunct-clauses (:filter this) where)))
+  (delete [this where]
+    (let [db (:db (meta this))
+          rel-keys (keys relations)
+          initial-select (when (or (filtered-by-rel (:filter this) rel-keys)
+                                   (filtered-by-rel where rel-keys))
+                           (core/find this [pk] where))
+          base-command (if initial-select
+                         (fn [results]
+                           (let [ids (->> (first results) (mapv pk))]
+                             (delete db table (f/conjunct-clauses (:filter this) {pk ids}))))
+                         (delete db table (f/conjunct-clauses (:filter this) where)))]
+      (if initial-select
+        (transaction db initial-select (vary-meta base-command assoc :tx-result true))
+        base-command)))
   (create-relation [this id relation-key rel-id]
     (let [{:keys [db repository]} (meta this)
           repository @(or repository (delay {}))
