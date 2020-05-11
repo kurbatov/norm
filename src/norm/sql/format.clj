@@ -144,7 +144,10 @@
 
 (defn conjunct-clauses
   ([x] x)
-  ([x y] (if (and x y) (list 'and x y) (or x y)))
+  ([x y]
+   (if (and (not-empty x) (not-empty y))
+     (list 'and x y)
+     (or (not-empty x) (not-empty y))))
   ([x y & more] (apply conjunct-clauses (conjunct-clauses x y) more)))
 
 ;; Source and target
