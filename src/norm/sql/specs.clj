@@ -14,10 +14,11 @@
 
 (s/def ::value any?)
 
-(s/def ::field (s/or :id         ::identifier
-                     :addregated (s/tuple symbol? ::identifier)
-                     :calculated (s/tuple symbol? ::identifier ::value)
-                     :alliased   (s/tuple ::field ::alias)))
+(s/def ::id-or-val (s/or :id ::identifier :val ::value))
+
+(s/def ::field (s/or :plain            ::id-or-val
+                     :stored-procedure (s/cat :fn ::predicate :args (s/* ::id-or-val))
+                     :aliased          (s/tuple ::field ::alias)))
 
 (s/def ::fields (s/coll-of ::field))
 
@@ -61,36 +62,36 @@
                :where ::where))
 
 (s/fdef sql/select
-  :args (s/or
+  :args (s/alt
          :base (s/cat :db (s/nilable any?)
                       :source ::source)
          :with-fields (s/cat :db (s/nilable any?)
-                             :source ::source
+                             :source (s/nilable ::source)
                              :fields (s/nilable ::fields))
          :with-where (s/cat :db (s/nilable any?)
-                            :source ::source
+                            :source (s/nilable ::source)
                             :fields (s/nilable ::fields)
                             :where (s/nilable ::where))
          :with-order (s/cat :db (s/nilable any?)
-                            :source ::source
+                            :source (s/nilable ::source)
                             :fields (s/nilable ::fields)
                             :where (s/nilable ::where)
                             :order (s/nilable ::order))
          :with-offset (s/cat :db (s/nilable any?)
-                             :source ::source
+                             :source (s/nilable ::source)
                              :fields (s/nilable ::fields)
                              :where (s/nilable ::where)
                              :order (s/nilable ::order)
                              :offset (s/nilable ::offset))
          :with-limit (s/cat :db (s/nilable any?)
-                            :source ::source
+                            :source (s/nilable ::source)
                             :fields (s/nilable ::fields)
                             :where (s/nilable ::where)
                             :order (s/nilable ::order)
                             :offset (s/nilable ::offset)
                             :limit (s/nilable ::limit))
          :full (s/cat :db (s/nilable any?)
-                      :source ::source
+                      :source (s/nilable ::source)
                       :fields (s/nilable ::fields)
                       :where (s/nilable ::where)
                       :order (s/nilable ::order)
@@ -104,7 +105,7 @@
 
 (s/def ::table keyword?)
 
-(s/def ::fields (s/coll-of keyword?))
+(s/def :entity/fields (s/coll-of keyword?))
 
 (s/def :rel/entity keyword?)
 
@@ -164,7 +165,7 @@
 (s/def ::relations (s/map-of keyword? ::relation))
 
 (s/def ::entity (s/keys :req-un [::table]
-                        :opt-un [::pk ::fields ::relations ::filter]))
+                        :opt-un [::pk :entity/fields ::relations ::filter]))
 
 (s/def ::repository (s/map-of keyword? ::entity))
 

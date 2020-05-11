@@ -62,7 +62,7 @@
      (keyword? field) (format-keyword-quoted field)
      (list? field) (if (contains? predicates (first field))
                      (wrap (apply (get predicates (first field)) (format-field (second field)) (map format-value (nnext field))))
-                     (wrapper (str/upper-case (str (first field))) (format-field (second field))))
+                     (wrapper (str/upper-case (->snake_case_string (first field))) (format-field (second field))))
      (vector? field) (apply format-field field)
      :else field))
   ([field alias]

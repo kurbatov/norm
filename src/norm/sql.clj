@@ -158,10 +158,11 @@
   
   Object
   (toString [this]
-    (cond->
-     (str
-      "SELECT " (->> (or fields [:*]) (map #(if (or (vector? %) (= :* %)) % [% %])) (map f/format-field) (str/join ", "))
-      " FROM " (f/format-source source))
+    (cond-> (str "SELECT " (->> (or fields [:*])
+                                (map #(if (and (keyword? %) (not= :* %)) [% %] %))
+                                (map f/format-field)
+                                (str/join ", ")))
+      source (str " FROM " (f/format-source source))
       (seq where) (str " WHERE " (f/format-clause where))
       order (str " ORDER BY " (f/format-order order))
       limit (str " LIMIT ?")
@@ -406,13 +407,16 @@
 ;; SQL repository
 
 (defn create-entity [entity-meta entity]
-  (let [fields (or
+  (let [table (:table entity)
+        schema (or (namespace table) (:schema entity-meta) "public")
+        table (if (namespace table) (keyword (name table)) table)
+        fields (or
                 (:fields entity)
                 (->> (select (:db entity-meta)
                             :information-schema/columns
                             [:column-name]
-                            {:table-schema [:ilike (:schema entity-meta "public")]
-                             :table-name   [:ilike (f/format-keyword (:table entity))]})
+                            {:table-schema [:ilike schema]
+                             :table-name   [:ilike (f/format-keyword table)]})
                     core/fetch!
                     (mapv (comp ->kebab-case-keyword :column-name))))]
     (-> entity
@@ -422,7 +426,12 @@
         (with-meta entity-meta))))
 
 (defmethod create-repository (.-name *ns*) [_ entities & [opts]]
-  (let [entity-meta (assoc opts :repository (promise))
+  (let [schema (or (:schema opts)
+                   (->> (select (:db opts) nil [['(current-schema) :current-schema]])
+                        core/fetch!
+                        first
+                        :current-schema))
+        entity-meta (assoc opts :schema schema :repository (promise))
         build-entity (partial create-entity entity-meta)]
     (->> entities
          (map (fn [[k v]] [k (build-entity (assoc v :name k))]))

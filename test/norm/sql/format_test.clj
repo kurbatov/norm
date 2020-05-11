@@ -49,6 +49,8 @@
   (is (= "name AS \"full-name\"" (f/format-field [:name :full-name])) "Aliased field may be supplied as a vector.")
   (is (= "\"employee\".name AS \"full-name\"" (f/format-field :employee/name :full-name)))
   (is (= "\"employee\".name AS \"user/full-name\"" (f/format-field :employee/name :user/full-name)))
+  (is (= "CURRENT_SCHEMA()" (f/format-field '(current-schema))) "Stored procedure should be formatted.")
+  (is (= "CURRENT_SCHEMA() AS \"current-schema\"" (f/format-field ['(current-schema) :current-schema])) "Stored procedure should be aliased")
   (is (= "COUNT(id)" (f/format-field '(count :id))) "Aggregation should be applied.")
   (is (= "COUNT(\"user\".id)" (f/format-field '(count :user/id))) "Namespace gets quoted inside an aggregation.")
   (is (= "COUNT(id) AS \"count\"" (f/format-field ['(count :id) :count])) "Aggregation is aliased")
