@@ -129,29 +129,19 @@
     (transaction (:db (meta this)) this next-command))
   
   core/Query
-  (join [this op r-source clause]
-    (-> (SQLQuery. [source op r-source clause] fields where order offset limit jdbc-opts)
-        (with-meta (meta this))))
-  (where [this clauses]
-    (-> (SQLQuery. source fields (f/conjunct-clauses where clauses) order offset limit jdbc-opts)
-        (with-meta (meta this))))
-  (order [this order]
-    (-> (SQLQuery. source fields where order offset limit jdbc-opts)
-        (with-meta (meta this))))
-  (skip [this amount]
-    (-> (SQLQuery. source fields where order amount limit jdbc-opts)
-        (with-meta (meta this))))
-  (limit [this amount]
-    (-> (SQLQuery. source fields where order offset amount jdbc-opts)
-        (with-meta (meta this))))
+  (join [this op r-source clause] (assoc this :source [source op r-source clause]))
+  (where [this clauses] (assoc this :where (f/conjunct-clauses where clauses)))
+  (order [this order] (assoc this :order order))
+  (skip [this amount] (assoc this :offset amount))
+  (limit [this amount] (assoc this :limit amount))
   (fetch! [this] (core/execute! this))
-  (fetch! [this fields]
-    (-> (SQLQuery. source fields where order offset limit jdbc-opts)
-        (with-meta (meta this))
-        core/fetch!))
+  (fetch! [this fields] (core/fetch! (assoc this :fields fields)))
   (fetch-count! [this]
-    (-> (SQLQuery. source [['(count :*) :count]] where nil nil nil jdbc-opts)
-        (with-meta (meta this))
+    (-> this
+        (assoc :fields [['(count :*) :count]]
+               :order nil
+               :offset nil
+               :limit nil)
         core/fetch!
         first
         :count))
@@ -164,7 +154,7 @@
                                 (str/join ", ")))
       source (str " FROM " (f/format-source source))
       (seq where) (str " WHERE " (f/format-clause where))
-      order (str " ORDER BY " (f/format-order order))
+      (seq order) (str " ORDER BY " (f/format-order order))
       limit (str " LIMIT ?")
       offset (str " OFFSET ?"))))
 
@@ -229,7 +219,9 @@
 (defrecord RelationalEntity [name table pk fields relations]
   core/Entity
   (create [this data]
-    (let [{:keys [db repository]} (meta this)
+    (let [prepare (:prepare this identity)
+          data (prepare data)
+          {:keys [db repository]} (meta this)
           repository @(or repository (delay {}))
           embedded-rels (filter (comp (partial contains? data) key) relations)
           instance (apply dissoc data (map key embedded-rels))
@@ -309,7 +301,9 @@
           (assoc :source [(:source relation-query) (if join-table :right-join :left-join) r-source clause])
           (assoc :where (f/conjunct-clauses (:where relation-query) (:where base-query))))))
   (update [this patch where]
-    (let [{:keys [db repository]} (meta this)
+    (let [prepare (:prepare this identity)
+          patch (prepare patch)
+          {:keys [db repository]} (meta this)
           repository @(or repository (delay {}))
           present-keys (set (keys patch))
           embedded-rels (->> relations (filter (comp present-keys key)))

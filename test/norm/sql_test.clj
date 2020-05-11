@@ -1,7 +1,8 @@
 (ns norm.sql-test
   (:require [clojure.test :as t :refer [deftest testing is]]
+            [clojure.string :as str]
             [next.jdbc :as jdbc]
-            [norm.core :as norm :refer [join where order skip limit fetch! fetch-count!]]
+            [norm.core :as norm :refer [where order skip limit fetch! fetch-count!]]
             [norm.sql :as sql]
             [norm.sql.specs :as sql.specs]))
 
@@ -39,7 +40,7 @@
     (let [query (sql/select nil :users [:id :name])]
       (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" WHERE (id = ?)" (-> query (where {:id 1}) str)))
       (is (= "SELECT id AS \"id\", name AS \"name\" FROM (users AS \"users\" LEFT JOIN people AS \"people\" ON (\"users\".person_id = \"people\".id)) WHERE (\"people\".name = ?)"
-             (-> query (join :left-join :people {:users/person-id :people/id}) (where {:people/name "John Doe"}) str)))
+             (-> query (norm/join :left-join :people {:users/person-id :people/id}) (where {:people/name "John Doe"}) str)))
       (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" OFFSET ?" (-> query (skip 2) str)))
       (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" LIMIT ?" (-> query (limit 10) str)))
       (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" LIMIT ? OFFSET ?" (-> query (skip 2) (limit 10) str)))
@@ -310,18 +311,24 @@ WHERE er.employee_id IS NULL)"])
         (is (= "SELECT \"user\".login AS \"user/login\", \"user.person\".name AS \"user.person/name\" FROM (users AS \"user\" LEFT JOIN people AS \"user.person\" ON (\"user\".id = \"user.person\".id)) WHERE (\"user\".id = ?)"
                (str (norm/find (:user repository) [:user/login :person/name] {:id 1}))
                (str (norm/find (:user repository) [:login :person/name] {:user/id 1})))))
-      (testing "creation with embedded entities"
-        (is (= {:id 4}
-               (-> (norm/create
-                    (:user-secret repository)
-                    {:secret "sha256xxxx"
-                     :user {:login "buzz.lightyear"
-                            :active false
-                            :person {:name "Buzz Lightyear"}}})
-                   norm/execute!)))
-        (is (= {:id 4 :secret "sha256xxxx"} (norm/fetch-by-id! (:user-secret repository) 4)))
-        (is (= {:id 4 :login "buzz.lightyear" :active false :person {:id 4 :name "Buzz Lightyear"}}
-               (norm/fetch-by-id! (:user repository) 4))))
+      (testing "creation"
+        (testing "with embedded entities"
+          (is (= {:id 4}
+                 (-> (norm/create
+                      (:user-secret repository)
+                      {:secret "sha256xxxx"
+                       :user {:login "buzz.lightyear"
+                              :active false
+                              :person {:name "Buzz Lightyear"}}})
+                     norm/execute!)))
+          (is (= {:id 4 :secret "sha256xxxx"} (norm/fetch-by-id! (:user-secret repository) 4)))
+          (is (= {:id 4 :login "buzz.lightyear" :active false :person {:id 4 :name "Buzz Lightyear"}}
+                 (norm/fetch-by-id! (:user repository) 4))))
+        (testing "with prepare function"
+          (let [person (assoc (:person repository) :prepare #(update % :name str/upper-case))]
+            (is (= {:id 5} (norm/create! person {:name "Sid"})))
+            (is (= {:id 5, :name "SID"} (norm/fetch-by-id! person 5))
+                "Field must be prepeocessed with `prepare` fn."))))
       (testing "eager fetching"
         (let [instance (norm/fetch-by-id! (:user repository) 1)]
           (is (= {:id 1
@@ -379,19 +386,25 @@ WHERE er.employee_id IS NULL)"])
         (is (= [{:id 1 :login "john.doe" :active true :person {:id 1 :name "John Doe" :gender "male"}}]
                (-> (norm/find-related (:user-secret repository) :user {:user.person/name "John Doe"}) fetch!))
             "Clause by a related entity's relation should join the source to the query."))
-      (testing "update with embedded entities"
-        (is (= 1 (norm/update! (:user repository) {:person {:name "Buzz"}} {:id 4})))
-        (is (= {:id 4 :name "Buzz"} (norm/fetch-by-id! (:person repository) 4))
-            "Updating of an embedded entity must change the entity.")
-        (is (= 2 (norm/update! (:user repository) {:role "user" :person {:name "Buzz Lightyear"}} {:id 4})))
-        (is (= {:id 4 :login "buzz.lightyear" :role "user" :active false :person {:id 4, :name "Buzz Lightyear"}}
-               (norm/fetch-by-id! (:user repository) 4))
-            "Updating with an embedded entity must change both the main and embedded entity."))
-      (testing "update filtered by relationship"
-        (is (= 1 (norm/update! (:user repository) {:login "buzz"} {:person/name "Buzz Lightyear"})))
-        (is (= {:id 4 :login "buzz" :role "user" :active false :person {:id 4, :name "Buzz Lightyear"}}
-               (norm/fetch-by-id! (:user repository) 4))
-            "Update with filtering by related entity must change the main entity."))
+      (testing "update"
+        (testing "with embedded entities"
+          (is (= 1 (norm/update! (:user repository) {:person {:name "Buzz"}} {:id 4})))
+          (is (= {:id 4 :name "Buzz"} (norm/fetch-by-id! (:person repository) 4))
+              "Updating of an embedded entity must change the entity.")
+          (is (= 2 (norm/update! (:user repository) {:role "user" :person {:name "Buzz Lightyear"}} {:id 4})))
+          (is (= {:id 4 :login "buzz.lightyear" :role "user" :active false :person {:id 4, :name "Buzz Lightyear"}}
+                 (norm/fetch-by-id! (:user repository) 4))
+              "Updating with an embedded entity must change both the main and embedded entity."))
+        (testing "filtered by relationship"
+          (is (= 1 (norm/update! (:user repository) {:login "buzz"} {:person/name "Buzz Lightyear"})))
+          (is (= {:id 4 :login "buzz" :role "user" :active false :person {:id 4, :name "Buzz Lightyear"}}
+                 (norm/fetch-by-id! (:user repository) 4))
+              "Update with filtering by related entity must change the main entity."))
+        (testing "with prepare function"
+          (let [person (assoc (:person repository) :prepare #(update % :name str/lower-case))]
+            (is (= 1 (norm/update! person {:name "Sid"} {:id 5})))
+            (is (= {:id 5, :name "sid"} (norm/fetch-by-id! person 5))
+                "Field must be preprocessed with prepare fn."))))
       (testing "changing relations"
         (is (= {:employee-id 1, :responsibility-id 2}
                (norm/create-relation! (:employee repository) 1 :responsibilities 2)))

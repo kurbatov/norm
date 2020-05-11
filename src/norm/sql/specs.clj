@@ -119,6 +119,8 @@
 
 (s/def ::filter ::clause)
 
+(s/def ::prepare fn?)
+
 (s/def ::eager boolean?)
 
 (s/def ::rel-required (s/keys :req-un [:rel/entity ::type ::fk]))
@@ -165,7 +167,7 @@
 (s/def ::relations (s/map-of keyword? ::relation))
 
 (s/def ::entity (s/keys :req-un [::table]
-                        :opt-un [::pk :entity/fields ::relations ::filter]))
+                        :opt-un [::pk :entity/fields ::relations ::filter ::prepare]))
 
 (s/def ::repository (s/map-of keyword? ::entity))
 
