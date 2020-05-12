@@ -123,8 +123,9 @@
                    limit (conj limit)
                    offset (conj offset))
           query (apply vector (str this) values)
-          db (:db (meta this))]
-      (jdbc/execute! db query (merge default-jdbc-opts jdbc-opts))))
+          {:keys [db transform]} (meta this)]
+      (cond->> (jdbc/execute! db query (merge default-jdbc-opts jdbc-opts))
+        transform (mapv transform))))
   (then [this next-command]
     (transaction (:db (meta this)) this next-command))
   
@@ -174,7 +175,7 @@
 ;; Relational entity
 
 (defn- build-query [entity where with-eager-fetch]
-  (let [{:keys [name table pk]} entity
+  (let [{:keys [name table pk transform]} entity
         repository @(or (:repository (meta entity)) (delay {}))
         relations (->> (:relations entity)
                        (filter (comp (partial contains? repository) :entity val))
@@ -206,8 +207,10 @@
                                                  IllegalArgumentException.
                                                  throw))]
                                 [left-src :left-join [(:table r-entity) k] clause]))
-                            [table name]))]
-    (select (:db (meta entity)) source fields where nil nil nil {:builder-fn as-entity-maps :entity entity})))
+                            [table name]))
+        opts (cond-> {:builder-fn as-entity-maps :entity entity}
+               transform (assoc :transform transform))]
+    (select (:db (meta entity)) source fields where nil nil nil opts)))
 
 (defn- filtered-by-rel
   "Determines if the `clause` map contains a keyword prefixed by one of `rel-keys`."

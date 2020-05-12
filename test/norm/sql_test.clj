@@ -356,8 +356,6 @@ WHERE er.employee_id IS NULL)"])
             "Clause by related entity's fields must work."))
       (testing "fetching fields of related entities"
         (is (= [{:login "john.doe", :person {:name "John Doe"}}] (norm/find! (:user repository) [:user/login :person/name] {:id 1}))))
-      (testing "filter by related entities without fetching"
-        (is (= [{:id 1, :secret "sha256(xxxxxxx)"}] (-> (norm/find (:user-secret repository) {:user/login "john.doe"}) fetch!))))
       (testing "fetching related entities"
         (is (= [{:id 1 :name "John Doe" :gender "male"}]
                (-> (norm/find-related (:user repository) :person {:id 1}) fetch!)
@@ -386,6 +384,17 @@ WHERE er.employee_id IS NULL)"])
         (is (= [{:id 1 :login "john.doe" :active true :person {:id 1 :name "John Doe" :gender "male"}}]
                (-> (norm/find-related (:user-secret repository) :user {:user.person/name "John Doe"}) fetch!))
             "Clause by a related entity's relation should join the source to the query."))
+      (testing "fetch with filter"
+        (is (= [{:id 1 :login "john.doe" :active true :person {:id 1, :name "John Doe", :gender "male"}}
+                {:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
+               (-> (:user repository) (norm/with-filter {:active true}) norm/find fetch!)))
+        (is (= [{:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
+               (-> (:user repository) (norm/with-filter {:active true}) (norm/find {:person/gender "female"}) fetch!))))
+      (testing "fetch with transform"
+        (let [person (assoc (:person repository) :transform #(update % :name str/lower-case))]
+          (is (= {:id 5, :name "sid"} (norm/fetch-by-id! person 5)))))
+      (testing "filter by related entities without eager fetching"
+        (is (= [{:id 1, :secret "sha256(xxxxxxx)"}] (-> (norm/find (:user-secret repository) {:user/login "john.doe"}) fetch!))))
       (testing "update"
         (testing "with embedded entities"
           (is (= 1 (norm/update! (:user repository) {:person {:name "Buzz"}} {:id 4})))
@@ -415,12 +424,6 @@ WHERE er.employee_id IS NULL)"])
         (is (= [{:id 1, :title "Cleaning", :active true} {:id 3, :title "Gardening", :active true}]
                (norm/find-related! (:employee repository) :responsibilities {:id 1}))
             "Deleted relation should not be found."))
-      (testing "fetch with filter"
-        (is (= [{:id 1 :login "john.doe" :active true :person {:id 1, :name "John Doe", :gender "male"}}
-                {:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
-               (-> (:user repository) (norm/with-filter {:active true}) norm/find fetch!)))
-        (is (= [{:id 3 :login "zoe.doe" :active true :person {:id 3, :name "Zoe Doe", :gender "female"}}]
-               (-> (:user repository) (norm/with-filter {:active true}) (norm/find {:person/gender "female"}) fetch!))))
       (testing "delete by related entity"
         (is (= 1 (norm/delete! (:user repository) {:person/name "Buzz Lightyear"})))
         (is (nil? (norm/fetch-by-id! (:user repository) 4)) "Deleted entity must not be found."))))
