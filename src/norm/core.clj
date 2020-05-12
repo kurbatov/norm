@@ -39,17 +39,6 @@
 (defprotocol Query
   "A query to an abstract storage."
   :extend-via-metadata true
-  (join ^Query [query op source clause]
-    "Adds `source` to the query linking it with specified `op`eration.
-
-    Example:
-
-    ```
-    (-> users-query
-        (join :left-join :people {:users/person-id :people/id})
-        (where {:people/name \"John Doe\"})
-        fetch!)
-    ```")
   (where ^Query [query clauses]
     "Adds clauses to the query.
 
@@ -84,11 +73,11 @@
 
     ```
     (-> users-query
-        (order [:name :id])
+        (order [:last-name :first-name :id])
         fetch!)
 
     (-> employees-query
-        (order {:salary :desc})
+        (order {:salary :desc, :last-name :asc})
         fetch!)
     ```")
   (skip ^Query [query amount]

@@ -126,11 +126,9 @@
           {:keys [db transform]} (meta this)]
       (cond->> (jdbc/execute! db query (merge default-jdbc-opts jdbc-opts))
         transform (mapv transform))))
-  (then [this next-command]
-    (transaction (:db (meta this)) this next-command))
+  (then [this next-command] (transaction (:db (meta this)) this next-command))
   
   core/Query
-  (join [this op r-source clause] (assoc this :source [source op r-source clause]))
   (where [this clauses] (assoc this :where (f/conjunct-clauses where clauses)))
   (order [this order] (assoc this :order order))
   (skip [this amount] (assoc this :offset amount))
@@ -172,6 +170,19 @@
    (-> (->SQLQuery source fields where order offset limit jdbc-opts)
        (with-meta (merge jdbc-opts {:db db})))))
 
+(defn join
+  "Adds `source` to the query joining it with specified `op`eration.
+
+  Example:
+
+  ```
+  (-> users-query
+      (join :left-join :people {:users/person-id :people/id})
+      (where {:people/name \"John Doe\"})
+      fetch!)
+  ```"
+  [query op r-source clause] (assoc query :source [(:source query) op r-source clause]))
+
 ;; Relational entity
 
 (defn- build-query [entity where with-eager-fetch]
@@ -194,7 +205,7 @@
         where (f/conjunct-clauses
                (f/ensure-prefixed name (:filter entity))
                (f/ensure-prefixed name where))
-        ks (->> (flatten-map where) (filter keyword?) (concat fields))
+        ks (->> (flatten-map where) (concat fields) flatten (filter keyword?))
         source (->> relations
                     (filter #(some (partial f/prefixed? (key %)) ks))
                     (reduce (fn [left-src [k v]]
@@ -392,14 +403,12 @@
         (and (= :has-many type)
              join-table)                  (delete db join-table {fk id, rfk rel-id}))))
   (with-filter [this where]
-    (assoc this :filter (f/conjunct-clauses (:filter this) where)))
-  (with-relations [this new-relations]
-    (-> (RelationalEntity. name table pk fields (merge relations new-relations))
-        (with-meta (meta this))))
+    (clojure.core/update this :filter f/conjunct-clauses where))
+  (with-relations [this relations]
+    (clojure.core/update this :relations merge relations))
   (with-eager [this rel-keys]
     (let [rel-keys (if (sequential? rel-keys) rel-keys [rel-keys])]
-      (-> (RelationalEntity. name table pk fields (reduce #(clojure.core/update %1 %2 assoc :eager true) relations rel-keys))
-          (with-meta (meta this))))))
+      (clojure.core/update this :relations (partial reduce #(clojure.core/update %1 %2 assoc :eager true)) rel-keys))))
 
 ;; SQL repository
 

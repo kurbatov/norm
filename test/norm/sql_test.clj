@@ -40,7 +40,7 @@
     (let [query (sql/select nil :users [:id :name])]
       (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" WHERE (id = ?)" (-> query (where {:id 1}) str)))
       (is (= "SELECT id AS \"id\", name AS \"name\" FROM (users AS \"users\" LEFT JOIN people AS \"people\" ON (\"users\".person_id = \"people\".id)) WHERE (\"people\".name = ?)"
-             (-> query (norm/join :left-join :people {:users/person-id :people/id}) (where {:people/name "John Doe"}) str)))
+             (-> query (sql/join :left-join :people {:users/person-id :people/id}) (where {:people/name "John Doe"}) str)))
       (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" OFFSET ?" (-> query (skip 2) str)))
       (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" LIMIT ?" (-> query (limit 10) str)))
       (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" LIMIT ? OFFSET ?" (-> query (skip 2) (limit 10) str)))
