@@ -310,7 +310,39 @@ WHERE er.employee_id IS NULL)"])
                (-> (norm/find (:employee repository)) (where {:employee.person/name "Jane Doe"}) str)))
         (is (= "SELECT \"user\".login AS \"user/login\", \"user.person\".name AS \"user.person/name\" FROM (users AS \"user\" LEFT JOIN people AS \"user.person\" ON (\"user\".id = \"user.person\".id)) WHERE (\"user\".id = ?)"
                (str (norm/find (:user repository) [:user/login :person/name] {:id 1}))
-               (str (norm/find (:user repository) [:login :person/name] {:user/id 1})))))
+               (str (norm/find (:user repository) [:login :person/name] {:user/id 1}))))
+        (is (= "SELECT \"user.person\".id AS \"user.person/id\", \"user.person\".name AS \"user.person/name\", \"user.person\".gender AS \"user.person/gender\", \"user.person\".birthday AS \"user.person/birthday\" FROM (people AS \"user.person\" LEFT JOIN users AS \"user\" ON (\"user\".id = \"user.person\".id)) WHERE (\"user.person\".id = ?)"
+               (-> (:user repository)
+                   (norm/find-related :person nil)
+                   (norm/where {:id 1})
+                   str))
+            "Field in WHERE clause must be prefixed with a selecting entity name.")
+        (is (= "SELECT \"user.person\".id AS \"user.person/id\", \"user.person\".name AS \"user.person/name\", \"user.person\".gender AS \"user.person/gender\", \"user.person\".birthday AS \"user.person/birthday\" FROM (people AS \"user.person\" LEFT JOIN users AS \"user\" ON (\"user\".id = \"user.person\".id)) WHERE (\"user\".id = ?)"
+               (-> (:user repository)
+                   (norm/find-related :person nil)
+                   (norm/where ^:exact {:user/id 1})
+                   str))
+            "Field in WHERE clause must not be modified for exact clause.")
+        (is (= "SELECT \"person\".id AS \"person/id\", \"person\".name AS \"person/name\", \"person\".gender AS \"person/gender\", \"person\".birthday AS \"person/birthday\" FROM people AS \"person\" ORDER BY \"person\".id, \"person\".name"
+               (-> (norm/find (:person repository))
+                   (norm/order [:id :name])
+                   str))
+            "Fields in ORDER clause must be prefixed with an entity name.")
+        (is (= "SELECT \"person\".id AS \"person/id\", \"person\".name AS \"person/name\", \"person\".gender AS \"person/gender\", \"person\".birthday AS \"person/birthday\" FROM people AS \"person\" ORDER BY \"person\".name DESC, \"person\".id ASC"
+               (-> (norm/find (:person repository))
+                   (norm/order {:name :desc :id :asc})
+                   str))
+            "Fields in ORDER clause must be prefixed with an entity name.")
+        (is (= "SELECT \"person\".id AS \"person/id\", \"person\".name AS \"person/name\", \"person\".gender AS \"person/gender\", \"person\".birthday AS \"person/birthday\" FROM people AS \"person\" ORDER BY id, name"
+               (-> (norm/find (:person repository))
+                   (norm/order ^:exact [:id :name])
+                   str))
+            "Fields in ORDER clause must not be modified for exact values.")
+        (is (= "SELECT \"person\".id AS \"person/id\", \"person\".name AS \"person/name\", \"person\".gender AS \"person/gender\", \"person\".birthday AS \"person/birthday\" FROM people AS \"person\" ORDER BY name DESC, id ASC"
+               (-> (norm/find (:person repository))
+                   (norm/order ^:exact {:name :desc :id :asc})
+                   str))
+            "Fields in ORDER clause must not be modified for exact values."))
       (testing "creation"
         (testing "with embedded entities"
           (is (= {:id 4}
@@ -360,7 +392,8 @@ WHERE er.employee_id IS NULL)"])
         (is (= [{:id 1 :name "John Doe" :gender "male"}]
                (-> (norm/find-related (:user repository) :person {:id 1}) fetch!)
                (-> (norm/find-related (:user repository) :person {:user/id 1}) fetch!)
-               (-> (norm/find-related (:user repository) :person nil) (where {:user/id 1}) fetch!)
+               (-> (norm/find-related (:user repository) :person nil) (where ^:exact {:user/id 1}) fetch!)
+               (-> (norm/find-related (:user repository) :person nil) (where {:id 1}) fetch!)
                (-> (norm/find-related (:user repository) :person {:person/name "John Doe"}) fetch!)
                (-> (norm/find-related (:user repository) :person {:user.person/name "John Doe"}) fetch!)))
         (is (= [{:id 3 :person-id 2 :type "email" :value "jane.doe@mailinator.com" :owner {:id 2 :name "Jane Doe" :gender "female"}}]

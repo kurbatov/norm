@@ -6,7 +6,9 @@
 
 ;; Formatting
 
-(defn prefix [ns-keyword name-keyword]
+(defn prefix
+  "Prefixes `name-keyword` with `ns-keyword`."
+  [ns-keyword name-keyword]
   (keyword
    (str
     (when-let [n (namespace ns-keyword)] (str n "."))
@@ -14,7 +16,9 @@
     (when-let [n (namespace name-keyword)] (str "." n)))
    (name name-keyword)))
 
-(defn prefixed? [prefix key]
+(defn prefixed?
+  "Determines if the `key` is prefixed with the `prefix`."
+  [prefix key]
   (str/starts-with?
    (or (namespace key) "")
    (str (when-let [n (namespace prefix)] (str n ".")) (name prefix))))
@@ -174,7 +178,7 @@
   ([order]
    (cond
      (vector? order) (apply format-order order)
-     (map? order) (->> order (map (fn [[k v]] (str (format-field k) " " (name v)))) (str/join ", "))
+     (map? order) (->> order (map (fn [[k v]] (str (format-field k) " " (str/upper-case (name v))))) (str/join ", "))
      (keyword? order) (format-field order)
      :else order))
   ([order & more]

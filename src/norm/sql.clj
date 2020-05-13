@@ -129,8 +129,20 @@
   (then [this next-command] (transaction (:db (meta this)) this next-command))
   
   core/Query
-  (where [this clauses] (assoc this :where (f/conjunct-clauses where clauses)))
-  (order [this order] (assoc this :order order))
+  (where [this clauses]
+    (let [exact (:exact (meta clauses))
+          entity (:entity (meta this))
+          clauses (if (and (not exact) entity)
+                    (f/ensure-prefixed (:name entity) clauses)
+                    clauses)]
+     (assoc this :where (f/conjunct-clauses where clauses))))
+  (order [this order]
+    (let [exact (:exact (meta order))
+          entity (:entity (meta this))
+          order (if (and (not exact) entity)
+                  (f/ensure-prefixed (:name entity) order)
+                  order)]
+      (assoc this :order order)))
   (skip [this amount] (assoc this :offset amount))
   (limit [this amount] (assoc this :limit amount))
   (fetch! [this] (core/execute! this))

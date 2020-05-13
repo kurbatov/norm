@@ -22,6 +22,7 @@
 (deftest ensure-prefixed-test
   (is (= {:user/id 1 :user/login "user"} (f/ensure-prefixed :user {:id 1 :login "user"})))
   (is (= {:user/id 1 :user.person/name "user"} (f/ensure-prefixed :user {:id 1 :person/name "user"})))
+  (is (= {:user.person/id 1 :user.person/name "user"} (f/ensure-prefixed :user/person {:id 1 :name "user"})))
   (is (= {:user/id 1 :user/login "user"} (f/ensure-prefixed :user {:user/id 1 :user/login "user"})))
   (is (= {:or {:user/id 1 :user/login "user"}} (f/ensure-prefixed :user {:or {:id 1 :login "user"}}))
       "Predicates should not be prefixed."))
@@ -120,9 +121,9 @@
   (is (= "id" (f/format-order [:id])))
   (is (= "id, name" (f/format-order [:id :name])))
   (is (= "\"user\".id, \"user\".name" (f/format-order [:user/id :user/name])))
-  (is (= "id asc" (f/format-order {:id :asc})))
-  (is (= "id asc, name desc" (f/format-order {:id :asc :name :desc})))
-  (is (= "\"user\".id asc, \"person\".name desc" (f/format-order {:user/id :asc :person/name :desc}))))
+  (is (= "id ASC" (f/format-order {:id :asc})))
+  (is (= "id ASC, name DESC" (f/format-order {:id :asc :name :desc})))
+  (is (= "\"user\".id ASC, \"person\".name DESC" (f/format-order {:user/id :asc :person/name :desc}))))
 
 (deftest extract-values-test
   (testing "Extract values"
