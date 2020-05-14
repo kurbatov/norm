@@ -311,6 +311,11 @@ WHERE er.employee_id IS NULL)"])
         (is (= "SELECT \"user\".login AS \"user/login\", \"user.person\".name AS \"user.person/name\" FROM (users AS \"user\" LEFT JOIN people AS \"user.person\" ON (\"user\".id = \"user.person\".id)) WHERE (\"user\".id = ?)"
                (str (norm/find (:user repository) [:user/login :person/name] {:id 1}))
                (str (norm/find (:user repository) [:login :person/name] {:user/id 1}))))
+        (is (= "SELECT \"user_secret\".id AS \"user-secret/id\", \"user_secret\".secret AS \"user-secret/secret\" FROM (secrets AS \"user_secret\" LEFT JOIN (users AS \"user_secret.user\" LEFT JOIN people AS \"user_secret.user.person\" ON (\"user_secret.user\".id = \"user_secret.user.person\".id)) ON (\"user_secret\".id = \"user_secret.user\".id)) WHERE (\"user_secret.user.person\".name = ?)"
+               (-> (:user-secret repository)
+                   (norm/find {:user.person/name "John Doe"})
+                   str))
+            "Usage of a relation's relation in WHERE clause must join it in.")
         (is (= "SELECT \"user.person\".id AS \"user.person/id\", \"user.person\".name AS \"user.person/name\", \"user.person\".gender AS \"user.person/gender\", \"user.person\".birthday AS \"user.person/birthday\" FROM (people AS \"user.person\" LEFT JOIN users AS \"user\" ON (\"user\".id = \"user.person\".id)) WHERE (\"user.person\".id = ?)"
                (-> (:user repository)
                    (norm/find-related :person nil)

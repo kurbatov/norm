@@ -197,20 +197,42 @@
 
 ;; Relational entity
 
+(defn- build-source [entity ks]
+  (let [{:keys [table name pk relations]} entity
+        repository @(or (:repository (meta entity)) (delay {}))]
+    (->> relations
+         (filter (comp (partial contains? repository) :entity val))
+         (map (fn [[k v]] [(f/prefix name k) v]))
+         (filter #(some (partial f/prefixed? (first %)) ks))
+         (reduce (fn source-reduction [l-source [k v]]
+                   (let [r-entity ((:entity v) repository)
+                         clause (condp = (:type v)
+                                  :has-one {(f/prefix name pk) (f/prefix k (:fk v))}
+                                  :belongs-to {(f/prefix name (:fk v)) (f/prefix k (:pk r-entity))}
+                                  (-> (str "Filtering and eager fetching a property of " k " is not supported.\n"
+                                           "It is supported for :has-one and :belongs-to relations only.")
+                                      IllegalArgumentException.
+                                      throw))
+                         restrictions (f/conjunct-clauses
+                                       (f/ensure-prefixed k (:filter r-entity))
+                                       (f/ensure-prefixed k (:filter v)))
+                         r-source (build-source
+                                   (assoc r-entity :name k)
+                                   (->> (flatten-map restrictions) (filter keyword?) (concat ks)))]
+                     [l-source :left-join r-source (f/conjunct-clauses clause restrictions)]))
+                 [table name]))))
+
 (defn- build-query [entity where with-eager-fetch]
-  (let [{:keys [name table pk transform]} entity
+  (let [{:keys [name transform]} entity
         repository @(or (:repository (meta entity)) (delay {}))
-        relations (->> (:relations entity)
-                       (filter (comp (partial contains? repository) :entity val))
-                       (map (fn [[k v]] [(f/prefix name k) v]))
-                       (into {}))
         eager (when with-eager-fetch
-                (->> relations
+                (->> (:relations entity)
+                     (filter (comp (partial contains? repository) :entity val))
                      (filter (comp :eager val))
                      (filter (comp #{:has-one :belongs-to} :type val))))
-        fields (reduce (fn [result [k v]]
+        fields (reduce (fn fields-reduction [result [k v]]
                          (->> (:fields ((:entity v) repository))
-                              (map (partial f/prefix k))
+                              (map (partial f/prefix (f/prefix name k)))
                               (into result)))
                        (f/ensure-prefixed name (:fields entity))
                        eager)
@@ -218,19 +240,7 @@
                (f/ensure-prefixed name (:filter entity))
                (f/ensure-prefixed name where))
         ks (->> (flatten-map where) (concat fields) flatten (filter keyword?))
-        source (->> relations
-                    (filter #(some (partial f/prefixed? (key %)) ks))
-                    (reduce (fn [left-src [k v]]
-                              (let [r-entity ((:entity v) repository)
-                                    clause (condp = (:type v)
-                                             :has-one {(f/prefix name pk) (f/prefix k (:fk v))}
-                                             :belongs-to {(f/prefix name (:fk v)) (f/prefix k (:pk r-entity))}
-                                             (-> (str "Filtering " name " by (or eager fetching a) property of " k " is not supported.\n"
-                                                      "Eager fetching and filtering by property of a relation is supported for :has-one and :belongs-to relations only.")
-                                                 IllegalArgumentException.
-                                                 throw))]
-                                [left-src :left-join [(:table r-entity) k] clause]))
-                            [table name]))
+        source (build-source entity ks)
         opts (cond-> {:builder-fn as-entity-maps :entity entity}
                transform (assoc :transform transform))]
     (select (:db (meta entity)) source fields where nil nil nil opts)))
