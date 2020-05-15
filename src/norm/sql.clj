@@ -160,7 +160,7 @@
   Object
   (toString [this]
     (cond-> (str "SELECT " (->> (or fields [:*])
-                                (map #(if (and (keyword? %) (not= :* %)) [% %] %))
+                                (map #(if (and (keyword? %) (not= "*" (name %))) [% %] %))
                                 (map f/format-field)
                                 (str/join ", ")))
       source (str " FROM " (f/format-source source))

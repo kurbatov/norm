@@ -33,6 +33,9 @@
            (str (sql/select nil [:users :user] [:user/id :user/name] {:user/id 1}))))
     (is (= "SELECT \"user\".id AS \"user/id\", \"person\".name AS \"person/name\" FROM (users AS \"user\" LEFT JOIN people AS \"person\" ON (\"user\".id = \"person\".id))"
            (str (sql/select nil [[:users :user] :left-join [:people :person] {:user/id :person/id}] [:user/id :person/name]))))
+    (is (= "SELECT \"users\".*, \"people\".* FROM (users AS \"users\" LEFT JOIN people AS \"people\" ON (\"users\".id = \"people\".id))"
+           (str (sql/select nil [:users :left-join :people {:users/id :people/id}] [:users/* :people/*])))
+        "Wildcard should go without alias.")
     (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\" FROM users AS \"user\" WHERE (\"user\".id IN ((SELECT user_id AS \"user-id\" FROM employees AS \"employees\" WHERE (active IS true))))"
            (str (sql/select nil [:users :user] [:user/id :user/login] {:user/id [:in (sql/select nil :employees [:user-id] {:active true})]}))))
     (is (= "SELECT CURRENT_SCHEMA() AS \"current-schema\"" (str (sql/select nil nil [['(current-schema) :current-schema]])))))
