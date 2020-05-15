@@ -4,7 +4,7 @@
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]
             [next.jdbc.date-time]
-            [camel-snake-kebab.core :refer [->kebab-case-keyword]]
+            [camel-snake-kebab.core :refer [->kebab-case-keyword ->kebab-case-string]]
             [clojure.spec.test.alpha :as st]
             [norm.core :as core :refer [where create-repository]]
             [norm.sql.format :as f]
@@ -14,7 +14,8 @@
 
 (def default-jdbc-opts
   {:return-keys true
-   :builder-fn rs/as-unqualified-lower-maps})
+   :label-fn ->kebab-case-string
+   :builder-fn rs/as-unqualified-modified-maps})
 
 (defmulti generate-sql-command
   "Generates SQL command depending on its type."
@@ -85,7 +86,7 @@
                                     (jdbc/with-transaction [tx db] (execute-transaction tx command)))
                                   (or (execute-sql-command command) default-result))]
                      (cond-> result
-                       (and (meta? result) entity)          (vary-meta assoc :entity entity )
+                       (and (meta? result) entity)          (vary-meta assoc :entity entity)
                        (and (meta? result) relation)        (vary-meta assoc :relation relation)
                        (#{:update :delete} (:type command)) :next.jdbc/update-count)))
    `core/then (fn then [command next-command]
@@ -429,7 +430,13 @@
   (with-relations [this relations]
     (clojure.core/update this :relations merge relations))
   (with-eager [this rel-keys]
-    (let [rel-keys (if (sequential? rel-keys) rel-keys [rel-keys])]
+    (let [rel-keys (if (sequential? rel-keys) rel-keys [rel-keys])
+          unknown-rels (complement (set (keys relations)))]
+      (when (some unknown-rels rel-keys)
+        (-> (str "Following relations are not defined for " (clojure.core/name name) ": "
+                 (->> rel-keys (filter unknown-rels) (str/join ", ")))
+            IllegalArgumentException.
+            throw))
       (clojure.core/update this :relations (partial reduce #(clojure.core/update %1 %2 assoc :eager true)) rel-keys))))
 
 ;; SQL repository
