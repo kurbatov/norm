@@ -260,13 +260,13 @@
 (deftest create-repository-test
   (sql.specs/instrument)
   (with-open [conn (jdbc/get-connection {:dbtype "h2:mem"})]
-    (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL, name VARCHAR(100), gender VARCHAR(10), birthday DATE)"])
-    (jdbc/execute! conn ["CREATE TABLE contacts (id BIGSERIAL, person_id BIGINT, type VARCHAR(32), value VARCHAR(128))"])
-    (jdbc/execute! conn ["CREATE TABLE users (id BIGINT, login VARCHAR(100), role VARCHAR(50), active BOOLEAN DEFAULT true)"])
-    (jdbc/execute! conn ["CREATE TABLE secrets (id BIGINT, secret VARCHAR(256))"])
-    (jdbc/execute! conn ["CREATE TABLE employees (id BIGSERIAL, supervisor_id BIGINT, salary NUMERIC(19, 4), active BOOLEAN DEFAULT true)"])
-    (jdbc/execute! conn ["CREATE TABLE responsibilities (id BIGSERIAL, title VARCHAR(128), description TEXT, active BOOLEAN DEFAULT true)"])
-    (jdbc/execute! conn ["CREATE TABLE employees_responsibilities (employee_id BIGINT, responsibility_id BIGINT)"])
+    (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL PRIMARY KEY, name VARCHAR(100), gender VARCHAR(10), birthday DATE)"])
+    (jdbc/execute! conn ["CREATE TABLE contacts (id BIGSERIAL PRIMARY KEY, person_id BIGINT REFERENCES people (id), type VARCHAR(32), value VARCHAR(128))"])
+    (jdbc/execute! conn ["CREATE TABLE users (id BIGINT PRIMARY KEY REFERENCES people (id), login VARCHAR(100), role VARCHAR(50), active BOOLEAN DEFAULT true)"])
+    (jdbc/execute! conn ["CREATE TABLE secrets (id BIGINT PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE, secret VARCHAR(256))"])
+    (jdbc/execute! conn ["CREATE TABLE employees (id BIGSERIAL PRIMARY KEY REFERENCES people (id), supervisor_id BIGINT REFERENCES employees (id), salary NUMERIC(19, 4), active BOOLEAN DEFAULT true)"])
+    (jdbc/execute! conn ["CREATE TABLE responsibilities (id BIGSERIAL PRIMARY KEY, title VARCHAR(128), description TEXT, active BOOLEAN DEFAULT true)"])
+    (jdbc/execute! conn ["CREATE TABLE employees_responsibilities (employee_id BIGINT REFERENCES employees (id), responsibility_id BIGINT REFERENCES responsibilities (id), PRIMARY KEY (employee_id,responsibility_id))"])
     (jdbc/execute! conn ["CREATE VIEW employees_responsibilities_negative AS
 (SELECT e.id AS employee_id, r.id AS responsibility_id
 FROM (employees AS e CROSS JOIN responsibilities AS r)

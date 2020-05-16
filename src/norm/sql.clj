@@ -120,7 +120,9 @@
 (defrecord SQLQuery [source fields where order offset limit jdbc-opts]
   core/Command
   (execute! [this]
-    (let [values (cond-> (f/extract-values where)
+    (let [values (cond-> (f/extract-values fields)
+                   where (into (f/extract-values where))
+                   (:having this) (into (f/extract-values (:having this)))
                    limit (conj limit)
                    offset (conj offset))
           query (apply vector (str this) values)
@@ -166,6 +168,8 @@
                                 (str/join ", ")))
       source (str " FROM " (f/format-source source))
       (seq where) (str " WHERE " (f/format-clause where))
+      (:group-by this) (str " GROUP BY " (->> (:group-by this) (map f/format-field) (str/join ", ")))
+      (:having this) (str " HAVING " (f/format-clause (:having this)))
       (seq order) (str " ORDER BY " (f/format-order order))
       limit (str " LIMIT ?")
       offset (str " OFFSET ?"))))

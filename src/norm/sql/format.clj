@@ -66,7 +66,7 @@
      (keyword? field) (format-keyword-quoted field)
      (list? field) (if (contains? predicates (first field))
                      (wrap (apply (get predicates (first field)) (format-field (second field)) (map format-value (nnext field))))
-                     (wrapper (str/upper-case (->snake_case_string (first field))) (format-field (second field))))
+                     (wrapper (str/upper-case (->snake_case_string (first field))) (->> (rest field) (map format-value) (str/join ", "))))
      (vector? field) (apply format-field field)
      :else field))
   ([field alias]
@@ -190,6 +190,7 @@
 
 (defn- extract-value [v]
   (cond
+    (map-entry? v) (extract-value (val v))
     (map? v) (map extract-value v)
     (and (coll? v) (keyword? (first v))) (->> (rest v) (mapv extract-value))
     (satisfies? core/Query v) (cond-> (extract-values (:where v))
@@ -198,14 +199,11 @@
     :else v))
 
 (defn extract-values [clause]
-  (cond
-    (map? clause) (->> clause
-                       (map (comp extract-value val))
-                       flatten
-                       (filter some?)
-                       (filter (complement boolean?))
-                       (filter (complement keyword?))
-                       (into []))
-    (or (vector? clause)
-        (list? clause)) (->> clause (map extract-values) flatten (into []))
-    :else []))
+  (->> (if (or (map? clause) (coll? clause)) clause [clause])
+       (map extract-value)
+       flatten
+       (filter some?)
+       (filter (complement boolean?))
+       (filter (complement keyword?))
+       (filter (complement symbol?))
+       (into [])))

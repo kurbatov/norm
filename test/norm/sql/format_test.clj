@@ -56,6 +56,7 @@
   (is (= "COUNT(\"user\".id)" (f/format-field '(count :user/id))) "Namespace gets quoted inside an aggregation.")
   (is (= "COUNT(id) AS \"count\"" (f/format-field ['(count :id) :count])) "Aggregation is aliased")
   (is (= "COUNT(\"user\".id) AS \"user/count\"" (f/format-field ['(count :user/id) :user/count])))
+  (is (= "STRING_AGG(\"cu\".column_name, ?) AS \"column-list\"" (f/format-field ['(string-agg :cu/column-name ",") :column-list])))
   (is (= "(\"employee\".id IS NOT NULL) AS \"employee\"" (f/format-field ['(not= :employee/id nil) :employee]))))
 
 (deftest format-clause-test
@@ -127,6 +128,11 @@
 
 (deftest extract-values-test
   (testing "Extract values"
+    (testing "from fields"
+      (is (= [] (f/extract-values [:id :name])))
+      (is (= [] (f/extract-values [[:user/id :id] [:person/name :name]])))
+      (is (= [] (f/extract-values [['(count :id) :count]])))
+      (is (= [","] (f/extract-values [['(string-agg :id ",") :count]]))))
     (testing "from clause"
       (is (= [] (f/extract-values {})))
       (is (= [1] (f/extract-values {:id 1})))
