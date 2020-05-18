@@ -4,6 +4,7 @@
             [next.jdbc :as jdbc]
             [norm.core :as norm :refer [where order skip limit fetch! fetch-count!]]
             [norm.sql :as sql]
+            [norm.sql.jdbc :refer [instance-meta]]
             [norm.sql.specs :as sql.specs]))
 
 (deftest sql-query-test
@@ -149,7 +150,7 @@
         (is (= {:id 1} (-> (norm/create user {:id 1 :login "john" :role "user"}) norm/execute!))))
       (testing "fetching"
         (is (= {:id 1 :name "John Doe" :gender "male"} (norm/fetch-by-id! person 1)))
-        (is (= (merge norm/instance-meta {:entity person}) (-> (norm/fetch-by-id! person 1) meta))
+        (is (= (merge instance-meta {:entity person}) (-> (norm/fetch-by-id! person 1) meta))
             "Metadata of an instance must contain an implementation of the `Instance `protocol and a reference to the entity.")
         (is (= [{:id 1 :name "John Doe" :gender "male"}
                 {:id 2 :name "Jane Doe" :gender "female"}]
@@ -378,9 +379,9 @@ WHERE er.employee_id IS NULL)"])
                            :name "John Doe"
                            :gender "male"}}
                  instance))
-          (is (= (merge norm/instance-meta {:entity (:user repository)})
+          (is (= (merge instance-meta {:entity (:user repository)})
                  (meta instance)))
-          (is (= (merge norm/instance-meta {:entity (:person repository)})
+          (is (= (merge instance-meta {:entity (:person repository)})
                  (meta (:person instance)))
               "Related entity must have correct metadata."))
         (is (= [{:id 2

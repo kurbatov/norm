@@ -6,7 +6,7 @@
                                           ResultSetBuilder
                                           read-column-by-index
                                           clob->string]]
-            [norm.core :refer [instance-meta]]
+            [norm.core :as core]
             [norm.sql.format :refer [format-alias]])
   (:import [java.sql ResultSet ResultSetMetaData Blob Clob]
            [java.util Locale]))
@@ -34,6 +34,17 @@
 (defn- persist! [x] (if (transient? x) (persistent! x) x))
 
 (defn- map-entry [k v] (clojure.lang.MapEntry/create k v))
+
+(def instance-meta
+  "Implementation of the `Instance` protocol."
+  {`persist (fn persist [instance]
+              (let [{:keys [entity]} (meta instance)
+                    {:keys [pk fields]} entity]
+                (core/update entity (select-keys instance (disj (set fields) pk)) {pk (pk instance)})))
+   `remove (fn remove [instance]
+             (let [{:keys [entity]} (meta instance)
+                   {:keys [pk]} entity]
+               (core/delete entity {pk (pk instance)})))})
 
 (defn- wrap-relations [relations repository x]
   (cond

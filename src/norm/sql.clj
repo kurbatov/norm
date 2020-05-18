@@ -76,6 +76,7 @@
           results)))))
 
 (def sql-command-meta
+  "Implementation of `Command` protocol."
   {`core/execute! (fn execute-command [command]
                    (let [{:keys [db entity relation]} (meta command)
                          default-result (cond-> (:values command)

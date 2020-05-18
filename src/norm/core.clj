@@ -226,19 +226,8 @@
 (defprotocol Instance
   "An instance of a persistent entity."
   :extend-via-metadata true
-  (persist ^Command [instance] "Creates a command that persists the state of the entity.")
-  (remove ^Command [instance] "Creates a command that removes the entity from the storage."))
-
-(def instance-meta
-  "Default implementation of the `Instance` protocol."
-  {`persist (fn persist [instance]
-              (let [{:keys [entity]} (meta instance)
-                    {:keys [pk fields]} entity]
-                (update entity (select-keys instance (disj (set fields) pk)) {pk (pk instance)})))
-   `remove (fn remove [instance]
-             (let [{:keys [entity]} (meta instance)
-                   {:keys [pk]} entity]
-               (delete entity {pk (pk instance)})))})
+  (persist ^Command [instance] "Creates a command that persists the state of the entity when executed.")
+  (remove ^Command [instance] "Creates a command that removes the entity from the storage when executed."))
 
 (defmulti create-repository
   "Creates a repository with specified underlying storage."
@@ -247,5 +236,8 @@
     (let [type (if (keyword? type)
                  (symbol (str (or (namespace type) "norm") "." (name type)))
                  type)]
-      (require type)
+      (try
+        (require type)
+        (catch java.io.FileNotFoundException e
+          (throw (IllegalArgumentException. (str "Cannot create repository of " type " type.") e))))
       type)))
