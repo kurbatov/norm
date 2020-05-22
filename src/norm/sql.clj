@@ -204,9 +204,9 @@
 ;; Relational entity
 
 (defn- build-source [entity ks]
-  (let [{:keys [table name pk relations]} entity
+  (let [{:keys [table name pk rels]} entity
         repository @(or (:repository (meta entity)) (delay {}))]
-    (->> relations
+    (->> rels
          (filter (comp (partial contains? repository) :entity val))
          (map (fn [[k v]] [(f/prefix name k) v]))
          (filter #(some (partial f/prefixed? (first %)) ks))
@@ -216,7 +216,7 @@
                                   :has-one {(f/prefix name pk) (f/prefix k (:fk v))}
                                   :belongs-to {(f/prefix name (:fk v)) (f/prefix k (:pk r-entity))}
                                   (-> (str "Filtering and eager fetching a property of " k " is not supported.\n"
-                                           "It is supported for :has-one and :belongs-to relations only.")
+                                           "It is supported for :has-one and :belongs-to rels only.")
                                       IllegalArgumentException.
                                       throw))
                          restrictions (f/conjunct-clauses
@@ -232,7 +232,7 @@
   (let [{:keys [name transform]} entity
         repository @(or (:repository (meta entity)) (delay {}))
         eager (when with-eager-fetch
-                (->> (:relations entity)
+                (->> (:rels entity)
                      (filter (comp (partial contains? repository) :entity val))
                      (filter (comp :eager val))
                      (filter (comp #{:has-one :belongs-to} :type val))))
@@ -258,14 +258,14 @@
        (filter keyword?)
        (some (fn [x] (some #(f/prefixed? % x) rel-keys)))))
 
-(defrecord RelationalEntity [name table pk fields relations]
+(defrecord RelationalEntity [name table pk fields rels]
   core/Entity
   (create [this data]
     (let [prepare (:prepare this identity)
           data (prepare data)
           {:keys [db repository]} (meta this)
           repository @(or repository (delay {}))
-          embedded-rels (filter (comp (partial contains? data) key) relations)
+          embedded-rels (filter (comp (partial contains? data) key) rels)
           instance (apply dissoc data (map key embedded-rels))
           dependencies (filter (comp (partial = :belongs-to) :type val) embedded-rels)
           dependents (filter (comp (partial = :has-one) :type val) embedded-rels)
@@ -311,8 +311,8 @@
   (find [this where] (build-query this where true))
   (find [this fields where] (build-query (assoc this :fields fields) where false))  
   (find-related [this relation-key where]
-    (let [relation (or (relation-key relations)
-                       (-> (str "Relation " relation-key " does not exist in " name ". Try one of the following " (keys relations))
+    (let [relation (or (relation-key rels)
+                       (-> (str "Relation " relation-key " does not exist in " name ". Try one of the following " (keys rels))
                            IllegalArgumentException.
                            throw))
           repository @(:repository (meta this) (delay {}))
@@ -348,9 +348,9 @@
           {:keys [db repository]} (meta this)
           repository @(or repository (delay {}))
           present-keys (set (keys patch))
-          embedded-rels (->> relations (filter (comp present-keys key)))
+          embedded-rels (->> rels (filter (comp present-keys key)))
           belongs-to-rels (->> embedded-rels (filter (comp (partial = :belongs-to) :type val)))
-          rel-keys (keys relations)
+          rel-keys (keys rels)
           initial-select (when (or (not-empty embedded-rels)
                                    (filtered-by-rel (:filter this) rel-keys)
                                    (filtered-by-rel where rel-keys))
@@ -394,7 +394,7 @@
         base-command)))
   (delete [this where]
     (let [db (:db (meta this))
-          rel-keys (keys relations)
+          rel-keys (keys rels)
           initial-select (when (or (filtered-by-rel (:filter this) rel-keys)
                                    (filtered-by-rel where rel-keys))
                            (core/find this [pk] where))
@@ -406,10 +406,10 @@
       (if initial-select
         (transaction db initial-select (vary-meta base-command assoc :tx-result true))
         base-command)))
-  (create-relation [this id relation-key rel-id]
+  (create-relation [this id rel-key rel-id]
     (let [{:keys [db repository]} (meta this)
           repository @(or repository (delay {}))
-          relation (relation-key relations)
+          relation (rel-key rels)
           {:keys [type fk rfk join-table]} relation
           entity ((:entity relation) repository)]
       (cond
@@ -418,10 +418,10 @@
              (not join-table))            (core/update entity {fk id} {(:pk entity) rel-id})
         (and (= :has-many type)
              join-table)                  (insert db join-table {fk id, rfk rel-id}))))
-  (delete-relation [this id relation-key rel-id]
+  (delete-relation [this id rel-key rel-id]
     (let [{:keys [db repository]} (meta this)
           repository @(or repository (delay {}))
-          relation (relation-key relations)
+          relation (rel-key rels)
           {:keys [type fk rfk join-table]} relation
           entity ((:entity relation) repository)]
       (cond
@@ -432,17 +432,17 @@
              join-table)                  (delete db join-table {fk id, rfk rel-id}))))
   (with-filter [this where]
     (clojure.core/update this :filter f/conjunct-clauses where))
-  (with-relations [this relations]
-    (clojure.core/update this :relations merge relations))
+  (with-rels [this rels]
+    (clojure.core/update this :rels merge rels))
   (with-eager [this rel-keys]
     (let [rel-keys (if (sequential? rel-keys) rel-keys [rel-keys])
-          unknown-rels (complement (set (keys relations)))]
+          unknown-rels (complement (set (keys rels)))]
       (when (some unknown-rels rel-keys)
-        (-> (str "Following relations are not defined for " (clojure.core/name name) ": "
+        (-> (str "Following rels are not defined for " (clojure.core/name name) ": "
                  (->> rel-keys (filter unknown-rels) (str/join ", ")))
             IllegalArgumentException.
             throw))
-      (clojure.core/update this :relations (partial reduce #(clojure.core/update %1 %2 assoc :eager true)) rel-keys))))
+      (clojure.core/update this :rels (partial reduce #(clojure.core/update %1 %2 assoc :eager true)) rel-keys))))
 
 ;; SQL repository
 

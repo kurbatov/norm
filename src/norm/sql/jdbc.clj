@@ -46,10 +46,10 @@
                    {:keys [pk]} entity]
                (core/delete entity {pk (pk instance)})))})
 
-(defn- wrap-relations [relations repository x]
+(defn- wrap-rels [rels repository x]
   (cond
-    (and (map-entry? x) (map? (val x)) ((key x) relations))
-    (if-let [entity (get repository (:entity ((key x) relations)))]
+    (and (map-entry? x) (map? (val x)) ((key x) rels))
+    (if-let [entity (get repository (:entity ((key x) rels)))]
       (map-entry
        (key x)
        (with-meta (val x) (merge instance-meta {:entity entity})))
@@ -68,9 +68,9 @@
   (->rs [this] (transient []))
   (with-row [this mrs row]
     (let [repository @(or (:repository (meta entity)) (delay {}))
-          wrap-relations (partial wrap-relations (:relations entity) repository)]
+          wrap-rels (partial wrap-rels (:rels entity) repository)]
       (conj! mrs
-             (-> (walk/postwalk wrap-relations row)
+             (-> (walk/postwalk wrap-rels row)
                  (with-meta (merge instance-meta {:entity entity}))))))
   (rs! [this mrs] (persistent! mrs)))
 

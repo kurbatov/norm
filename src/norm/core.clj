@@ -162,21 +162,21 @@
     ```
     (def active-user (with-filter user {:active true}))
     ```")
-  (with-relations ^Entity [entity relations]
-    "Creates a new entity based on the specified one amending relations.
+  (with-rels ^Entity [entity rels]
+    "Creates a new entity based on the specified one amending `rels`.
 
     Example:
 
     ```
     (def user-with-personal-data
-      (with-relations user
-                      {:person {:entity :person
-                                :type :has-one
-                                :fk :user-id
-                                :eager true}}))
+      (with-rels user
+                 {:person {:entity :person
+                           :type :has-one
+                           :fk :user-id
+                           :eager true}}))
     ```")
   (with-eager ^Entity [entity rel-keys]
-    "Makes specified relations to be fetched eagerly.
+    "Makes specified `rels` to be fetched eagerly.
 
     Example:
 

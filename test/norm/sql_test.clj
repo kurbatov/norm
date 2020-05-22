@@ -187,76 +187,76 @@
           (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\", \"user\".role AS \"user/role\", \"user\".active AS \"user/active\" FROM users AS \"user\" WHERE (((\"user\".active IS true) AND (\"user\".role = ?)) AND (\"user\".id = ?))"
                  (-> active-admin (norm/find {:id 1}) str)))))
       (testing "mutating an entity"
-        (is (= (merge user {:relations {:secret {:entity :secret
-                                                 :type :has-one
-                                                 :fk :user-id}}})
-               (norm/with-relations user {:secret {:entity :secret
-                                                   :type :has-one
-                                                   :fk :user-id}})))
+        (is (= (merge user {:rels {:secret {:entity :secret
+                                            :type :has-one
+                                            :fk :user-id}}})
+               (norm/with-rels user {:secret {:entity :secret
+                                              :type :has-one
+                                              :fk :user-id}})))
         (is (= true
                (-> user
-                   (norm/with-relations {:secret {:entity :secret
-                                                  :type :has-one
-                                                  :fk :user-id}})
+                   (norm/with-rels {:secret {:entity :secret
+                                             :type :has-one
+                                             :fk :user-id}})
                    (norm/with-eager [:secret])
-                   (get-in [:relations :secret :eager]))))))))
+                   (get-in [:rels :secret :eager]))))))))
 
 (def entities
   {:person {:table :people
-            :relations {:contacts {:entity :contact
-                                   :type :has-many
-                                   :fk :person-id}}}
+            :rels {:contacts {:entity :contact
+                              :type :has-many
+                              :fk :person-id}}}
    :contact {:table :contacts
-             :relations {:owner {:entity :person
-                                 :type :belongs-to
-                                 :fk :person-id
-                                 :eager true}}}
+             :rels {:owner {:entity :person
+                            :type :belongs-to
+                            :fk :person-id
+                            :eager true}}}
    :user {:table :users
-          :relations {:person {:entity :person
-                               :type :belongs-to
-                               :fk :id
-                               :eager true}}}
+          :rels {:person {:entity :person
+                          :type :belongs-to
+                          :fk :id
+                          :eager true}}}
    :user-secret {:table :secrets
-                 :relations {:user {:entity :user
-                                     :type :belongs-to
-                                     :fk :id}}}
+                 :rels {:user {:entity :user
+                               :type :belongs-to
+                               :fk :id}}}
    :employee {:table :employees
-              :relations {:person {:entity :person
+              :rels {:person {:entity :person
+                              :type :belongs-to
+                              :fk :id
+                              :eager true}
+                     :supervisor {:entity :employee
                                    :type :belongs-to
-                                   :fk :id
-                                   :eager true}
-                          :supervisor {:entity :employee
-                                       :type :belongs-to
-                                       :fk :supervisor-id}
-                          :subordinates {:entity :employee
-                                         :type :has-many
-                                         :fk :supervisor-id
-                                         :filter {:active true}}
-                          :responsibilities {:entity :responsibility
-                                             :type :has-many
-                                             :fk :employee-id
-                                             :rfk :responsibility-id
-                                             :join-table :employees-responsibilities
-                                             :filter {:active true}}
-                          :nonresponsibilities {:entity :responsibility
-                                                :type :has-many
-                                                :fk :employee-id
-                                                :rfk :responsibility-id
-                                                :join-table :employees-responsibilities-negative
-                                                :filter {:active true}}}}
+                                   :fk :supervisor-id}
+                     :subordinates {:entity :employee
+                                   :type :has-many
+                                   :fk :supervisor-id
+                                   :filter {:active true}}
+                     :responsibilities {:entity :responsibility
+                                          :type :has-many
+                                          :fk :employee-id
+                                          :rfk :responsibility-id
+                                          :join-table :employees-responsibilities
+                                          :filter {:active true}}
+                     :nonresponsibilities {:entity :responsibility
+                                          :type :has-many
+                                          :fk :employee-id
+                                          :rfk :responsibility-id
+                                          :join-table :employees-responsibilities-negative
+                                          :filter {:active true}}}}
    :responsibility {:table :responsibilities
-                    :relations {:employees {:entity :employee
-                                            :type :has-many
-                                            :fk :responsibility-id
-                                            :rfk :employee-id
-                                            :join-table :employees-responsibilities
-                                            :filter {:active true}}
-                                :nonemployees {:entity :employee
-                                               :type :has-many
-                                               :fk :responsibility-id
-                                               :rfk :employee-id
-                                               :join-table :employees-responsibilities-negative
-                                               :filter {:active true}}}}})
+                    :rels {:employees {:entity :employee
+                                       :type :has-many
+                                       :fk :responsibility-id
+                                       :rfk :employee-id
+                                       :join-table :employees-responsibilities
+                                       :filter {:active true}}
+                            :nonemployees {:entity :employee
+                                          :type :has-many
+                                          :fk :responsibility-id
+                                          :rfk :employee-id
+                                          :join-table :employees-responsibilities-negative
+                                          :filter {:active true}}}}})
 
 (deftest create-repository-test
   (sql.specs/instrument)

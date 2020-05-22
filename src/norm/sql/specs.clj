@@ -161,15 +161,15 @@
            :opt-un [::filter])
    #(not (contains? % :eager))))
 
-(s/def ::relation (s/or :belongs-to   ::belongs-to-rel
-                        :has-one      ::has-one-rel
-                        :many-to-one  ::has-many-to-one-rel
-                        :many-to-many ::has-many-to-many-rel))
+(s/def ::rel (s/or :belongs-to   ::belongs-to-rel
+                   :has-one      ::has-one-rel
+                   :many-to-one  ::has-many-to-one-rel
+                   :many-to-many ::has-many-to-many-rel))
 
-(s/def ::relations (s/map-of keyword? ::relation))
+(s/def ::rels (s/map-of keyword? ::rel))
 
 (s/def ::entity (s/keys :req-un [::table]
-                        :opt-un [::pk :entity/fields ::relations ::filter ::prepare ::transform]))
+                        :opt-un [::pk :entity/fields ::rels ::filter ::prepare ::transform]))
 
 (s/def ::repository (s/map-of keyword? ::entity))
 
