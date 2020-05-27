@@ -405,6 +405,18 @@ WHERE er.employee_id IS NULL)"])
                (-> (norm/find-related (:user repository) :person nil) (where {:id 1}) fetch!)
                (-> (norm/find-related (:user repository) :person {:person/name "John Doe"}) fetch!)
                (-> (norm/find-related (:user repository) :person {:user.person/name "John Doe"}) fetch!)))
+        (is (some? (-> (norm/find-related! (:user repository) :person {:id 1})
+                       first
+                       meta
+                       :entity))
+            "Instance of related entity should have an entity in meta.")
+        (is (some? (-> (norm/find-related! (:user repository) :person {:id 1})
+                       first
+                       meta
+                       ((comp (partial partial =) :entity))
+                       (filter (vals repository))
+                       first))
+            "Instance of related entity should have a correct entity in metadata (found in repository).")
         (is (= [{:id 3 :person-id 2 :type "email" :value "jane.doe@mailinator.com" :owner {:id 2 :name "Jane Doe" :gender "female"}}]
                (-> (norm/find-related (:person repository) :contacts {:person/name "Jane Doe"}) fetch!)))
         (is (= 0 (-> (norm/find-related (:person repository) :contacts {:id 3}) fetch-count!)))

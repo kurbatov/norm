@@ -317,7 +317,11 @@
                            throw))
           repository @(:repository (meta this) (delay {}))
           alias (f/prefix name relation-key)
-          entity (-> ((:entity relation) repository) (assoc :name alias))
+          entity ((:entity relation) repository)
+          transform (fn [instance] (vary-meta instance assoc :entity entity))
+          entity (-> entity
+                     (assoc :name alias)
+                     (clojure.core/update :transform #(if % (comp % transform) transform)))
           where (f/ensure-prefixed name where)
           r-where (->> where
                        (filter (comp (partial f/prefixed? alias) key))
