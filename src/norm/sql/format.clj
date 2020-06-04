@@ -32,6 +32,10 @@
       %)
    coll))
 
+(def ^:dynamic *->db-case*
+  "Transforms an identifier to comply to database naming convention."
+  ->snake_case_string)
+
 (defn sql-quote [x] (str \" x \"))
 (defn wrap [x] (str "(" x ")"))
 (defn infix [k op v] (str/join " " [k op v]))
@@ -39,11 +43,11 @@
 (defn wrapper [op v] (str op (wrap v)))
 (defn ternary [k op v1 sep v2] (wrap (str/join " " [k op v1 sep v2])))
 
-(defn format-keyword [x] (cond->> (->snake_case_string (name x))
-                           (namespace x) (str (->snake_case_string (namespace x)) ".")))
+(defn format-keyword [x] (cond->> (*->db-case* (name x))
+                           (namespace x) (str (*->db-case* (namespace x)) ".")))
 
-(defn format-keyword-quoted [x] (cond->> (->snake_case_string (name x))
-                                  (namespace x) (str (sql-quote (->snake_case_string (namespace x))) ".")))
+(defn format-keyword-quoted [x] (cond->> (*->db-case* (name x))
+                                  (namespace x) (str (sql-quote (*->db-case* (namespace x))) ".")))
 
 (defn format-value [x]
   (cond
@@ -66,7 +70,7 @@
      (keyword? field) (format-keyword-quoted field)
      (list? field) (if (contains? predicates (first field))
                      (wrap (apply (get predicates (first field)) (format-field (second field)) (map format-value (nnext field))))
-                     (wrapper (str/upper-case (->snake_case_string (first field))) (->> (rest field) (map format-value) (str/join ", "))))
+                     (wrapper (str/upper-case (*->db-case* (first field))) (->> (rest field) (map format-value) (str/join ", "))))
      (vector? field) (apply format-field field)
      :else field))
   ([field alias]
