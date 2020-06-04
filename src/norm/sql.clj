@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]
+            [next.jdbc.protocols :refer [Sourceable]]
             [next.jdbc.date-time]
             [camel-snake-kebab.core :refer [->kebab-case-keyword ->kebab-case-string]]
             [clojure.spec.test.alpha :as st]
@@ -39,6 +40,8 @@
 (defmethod generate-sql-command :delete [{:keys [target where]}]
   (str "DELETE FROM " (f/format-target target)
        (when where (str " WHERE " (f/format-clause where)))))
+
+(defmethod generate-sql-command :default [x] (str x))
 
 (defn- execute-sql-command [command]
   (let [{:keys [type values where]} command
@@ -460,7 +463,7 @@
                             :information-schema/columns
                             [:column-name]
                             {:table-schema [:ilike schema]
-                             :table-name   [:ilike (f/format-keyword table)]})
+                             :table-name   [:ilike (f/format-target table)]})
                     core/fetch!
                     (mapv (comp ->kebab-case-keyword :column-name))))]
     (-> entity
@@ -469,13 +472,27 @@
         map->RelationalEntity
         (with-meta entity-meta))))
 
+(defn get-db-meta
+  "Returns meta-data object for `Connectable` or `Connection`."
+  ^java.sql.DatabaseMetaData
+  [db]
+  (if (satisfies? Sourceable db)
+    (with-open [con (.getMetaData (jdbc/get-connection db))]
+      (.getMetaData con))
+    (.getMetaData db)))
+
 (defmethod create-repository (.-name *ns*) [_ entities & [opts]]
-  (let [schema (or (:schema opts)
-                   (->> (select (:db opts) nil [['(current-schema) :current-schema]])
+  (let [db (:db opts)
+        db-meta (get-db-meta db)
+        schema (or (:schema opts)
+                   (->> (select db nil [['(current-schema) :current-schema]])
                         core/fetch!
                         first
                         :current-schema))
-        entity-meta (assoc opts :schema schema :repository (promise))
+        entity-meta (assoc opts
+                           :db-type (.getDatabaseProductName db-meta)
+                           :schema schema
+                           :repository (promise))
         build-entity (partial create-entity entity-meta)]
     (->> entities
          (map (fn [[k v]] [k (build-entity (assoc v :name k))]))
