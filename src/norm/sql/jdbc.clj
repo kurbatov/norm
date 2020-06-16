@@ -37,14 +37,14 @@
 
 (def instance-meta
   "Implementation of the `Instance` protocol."
-  {`persist (fn persist [instance]
-              (let [{:keys [entity]} (meta instance)
-                    {:keys [pk fields]} entity]
-                (core/update entity (select-keys instance (disj (set fields) pk)) {pk (pk instance)})))
-   `remove (fn remove [instance]
-             (let [{:keys [entity]} (meta instance)
-                   {:keys [pk]} entity]
-               (core/delete entity {pk (pk instance)})))})
+  {`core/persist (fn persist [instance]
+                   (let [{:keys [entity]} (meta instance)
+                         {:keys [pk fields]} entity]
+                     (core/update entity (select-keys instance (disj (set fields) pk)) {pk (pk instance)})))
+   `core/remove (fn remove [instance]
+                  (let [{:keys [entity]} (meta instance)
+                        {:keys [pk]} entity]
+                    (core/delete entity {pk (pk instance)})))})
 
 (defn- wrap-rels [rels repository x]
   (cond
