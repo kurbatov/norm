@@ -453,6 +453,41 @@
 
 ;; SQL repository
 
+(def sql-repository-meta
+  {`core/add-entity
+   (fn add-entity [this entity]
+     (let [r (promise)]
+       (->> (assoc this (:name entity) entity)
+            (map (fn [[k v]] [k (vary-meta v assoc :repository r)]))
+            (into {})
+            (#(with-meta % (meta this)))
+            (deliver r)
+            deref)))
+   `core/except
+   (fn except [this entity-names]
+     (let [r (promise)
+           entity-names (if (coll? entity-names)
+                          entity-names
+                          [entity-names])]
+       (->> (apply dissoc this entity-names)
+            (map (fn [[k v]] [k (vary-meta v assoc :repository r)]))
+            (into {})
+            (#(with-meta % (meta this)))
+            (deliver r)
+            deref)))
+   `core/only
+   (fn only [this entity-names]
+     (let [r (promise)
+           entity-names (if (coll? entity-names)
+                          entity-names
+                          [entity-names])]
+       (->> (select-keys this entity-names)
+            (map (fn [[k v]] [k (vary-meta v assoc :repository r)]))
+            (into {})
+            (#(with-meta % (meta this)))
+            (deliver r)
+            deref)))})
+
 (defn create-entity [entity-meta entity]
   (let [table (:table entity)
         schema (or (namespace table) (:schema entity-meta) "public")
@@ -497,7 +532,7 @@
     (->> entities
          (map (fn [[k v]] [k (build-entity (assoc v :name k))]))
          (into {})
-         (#(with-meta % opts))
+         (#(with-meta % (merge sql-repository-meta opts)))
          (deliver (:repository entity-meta))
          deref)))
 

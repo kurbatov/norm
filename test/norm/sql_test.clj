@@ -93,6 +93,9 @@
     (is (= "UPDATE users SET login = ?, role = ? WHERE (id = ?)" (sql/generate-sql-command (sql/update nil :users {:login "admin", :role "admin"} {:id 1})))))
   (testing "Delete command building"
     (is (= "DELETE FROM users WHERE (id = ?)" (sql/generate-sql-command (sql/delete nil :users {:id 1})))))
+  (testing "Select command building"
+    (is (= "SELECT id AS \"id\", login AS \"login\" FROM users AS \"users\" WHERE (id = ?)"
+           (sql/generate-sql-command (sql/select nil :users [:id :login] {:id 1})))))
   (testing "Execution"
     (with-open [conn (jdbc/get-connection {:dbtype "h2:mem"})]
       (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL, name VARCHAR(100) NOT NULL, gender VARCHAR(10), birthday DATE)"])
@@ -261,7 +264,8 @@
 (deftest create-repository-test
   (sql.specs/instrument)
   (with-open [conn (jdbc/get-connection {:dbtype "h2:mem"})]
-    (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL PRIMARY KEY, name VARCHAR(100), gender VARCHAR(10), birthday DATE)"])
+    (jdbc/execute! conn ["CREATE TYPE GENDER AS ENUM ('male', 'female')"])
+    (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL PRIMARY KEY, name VARCHAR(100), gender GENDER, birthday DATE)"])
     (jdbc/execute! conn ["CREATE TABLE contacts (id BIGSERIAL PRIMARY KEY, person_id BIGINT REFERENCES people (id), type VARCHAR(32), value VARCHAR(128))"])
     (jdbc/execute! conn ["CREATE TABLE users (id BIGINT PRIMARY KEY REFERENCES people (id), login VARCHAR(100), role VARCHAR(50), active BOOLEAN DEFAULT true)"])
     (jdbc/execute! conn ["CREATE TABLE secrets (id BIGINT PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE, secret VARCHAR(256))"])
@@ -301,6 +305,10 @@ WHERE er.employee_id IS NULL)"])
     (let [repository (norm/create-repository :sql entities {:db conn})]
       #_(is (instance? norm.sql.RelationalEntity (:person repository)))
       (is (= repository @(:repository (meta (:person repository)))) "Entity must have repository in metadata.")
+      (is (= (keys entities) (keys repository)) "All the entities should be presented in the repository.")
+      (is (= [:person :contact] (keys (norm/only repository [:person :contact]))) "Only specified entities must be present.")
+      (is (= [:person :contact :user] (keys (norm/except repository [:user-secret :employee :responsibility])))
+          "Specified entities must be absent.")
       (testing "Fields populated."
         (is (= [:id :name :gender :birthday] (get-in repository [:person :fields])))
         (is (= [:id :person-id :type :value] (get-in repository [:contact :fields])))
@@ -367,9 +375,9 @@ WHERE er.employee_id IS NULL)"])
                  (norm/fetch-by-id! (:user repository) 4))))
         (testing "with prepare function"
           (let [person (assoc (:person repository) :prepare #(update % :name str/upper-case))]
-            (is (= {:id 5} (norm/create! person {:name "Sid"})))
-            (is (= {:id 5, :name "SID"} (norm/fetch-by-id! person 5))
-                "Field must be prepeocessed with `prepare` fn."))))
+            (is (= {:id 5} (norm/create! person {:name "Sid" :gender "male"})))
+            (is (= {:id 5, :name "SID" :gender "male"} (norm/fetch-by-id! person 5))
+                "Field must be preprocessed with `prepare` fn."))))
       (testing "eager fetching"
         (let [instance (norm/fetch-by-id! (:user repository) 1)]
           (is (= {:id 1
@@ -446,7 +454,7 @@ WHERE er.employee_id IS NULL)"])
                (-> (:user repository) (norm/with-filter {:active true}) (norm/find {:person/gender "female"}) fetch!))))
       (testing "fetch with transform"
         (let [person (assoc (:person repository) :transform #(update % :name str/lower-case))]
-          (is (= {:id 5, :name "sid"} (norm/fetch-by-id! person 5)))))
+          (is (= {:id 5, :name "sid", :gender "male"} (norm/fetch-by-id! person 5)))))
       (testing "filter by related entities without eager fetching"
         (is (= [{:id 1, :secret "sha256(xxxxxxx)"}] (-> (norm/find (:user-secret repository) {:user/login "john.doe"}) fetch!))))
       (testing "update"
@@ -466,7 +474,7 @@ WHERE er.employee_id IS NULL)"])
         (testing "with prepare function"
           (let [person (assoc (:person repository) :prepare #(update % :name str/lower-case))]
             (is (= 1 (norm/update! person {:name "Sid"} {:id 5})))
-            (is (= {:id 5, :name "sid"} (norm/fetch-by-id! person 5))
+            (is (= {:id 5, :name "sid", :gender "male"} (norm/fetch-by-id! person 5))
                 "Field must be preprocessed with prepare fn."))))
       (testing "changing relations"
         (is (= {:employee-id 1, :responsibility-id 2}

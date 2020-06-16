@@ -117,7 +117,7 @@
         (fetch! [:id :login]))
     ```")
   (fetch-count! ^Long [query]
-    "Fetches the amount of records for the given query.
+    "Fetches the amount of matching records for the given query.
 
     Example:
 
@@ -137,7 +137,7 @@
   :extend-via-metadata true
   (create ^Command [entity data]
     "Builds a command that creates a new instance of the entity in the storage when executed.
-    `data` may contain data for related entities.")
+    `data` may contain embedded properties of related entities.")
   (fetch-by-id! [entity id]
     "Fetches an instance of the entity with specified id from the storage immediately.")
   (find ^Query [entity] ^Query [entity where] ^Query [entity fields where]
@@ -228,6 +228,17 @@
   :extend-via-metadata true
   (persist ^Command [instance] "Creates a command that persists the state of the entity when executed.")
   (remove ^Command [instance] "Creates a command that removes the entity from the storage when executed."))
+
+(defprotocol Repository
+  "Collection of inter-related entities."
+  :extend-via-metadata true
+  (add-entity [repository entity]
+    "Returns new repository with additional entity.
+     Replaces an entity with the same name if already exists.")
+  (except [repository entity-names]
+    "Returns a repository without entities of specified names.")
+  (only [repository entity-names]
+    "Returns a repository that contains only entities with specified names."))
 
 (defmulti create-repository
   "Creates a repository with specified underlying storage."

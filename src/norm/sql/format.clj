@@ -43,11 +43,17 @@
 (defn wrapper [op v] (str op (wrap v)))
 (defn ternary [k op v1 sep v2] (wrap (str/join " " [k op v1 sep v2])))
 
-(defn format-keyword [x] (cond->> (*->db-case* (name x))
-                           (namespace x) (str (*->db-case* (namespace x)) ".")))
+(defn format-target [x]
+  (*->db-case*
+   (if (namespace x)
+     (str (namespace x) "." (name x))
+     (name x))))
 
-(defn format-keyword-quoted [x] (cond->> (*->db-case* (name x))
-                                  (namespace x) (str (sql-quote (*->db-case* (namespace x))) ".")))
+(defn format-keyword-quoted [x]
+  (*->db-case*
+   (if (namespace x)
+     (str (sql-quote (namespace x)) "." (name x))
+     (name x))))
 
 (defn format-value [x]
   (cond
@@ -60,7 +66,7 @@
 (defn format-alias [x]
   (if (keyword? x)
     (if (namespace x)
-      (str/join "/" ((juxt namespace name) x))
+      (str (namespace x) "/" (name x))
       (name x))
     x))
 
@@ -168,13 +174,11 @@
      :else source))
   ([source alias]
    (infix
-    (if (keyword? source) (format-keyword source) (wrap source))
-    "AS" (sql-quote (format-keyword alias))))
+    (if (keyword? source) (format-target source) (wrap source))
+    "AS" (sql-quote (format-target alias))))
   ([left op right clause]
    (let [op (str/upper-case (str/replace (name op) "-" " "))]
      (ternary (format-source left) op (format-source right) "ON" (format-clause clause)))))
-
-(defn format-target [target] (format-keyword target))
 
 ;; Order
 
