@@ -512,7 +512,7 @@
   ^java.sql.DatabaseMetaData
   [db]
   (if (satisfies? Sourceable db)
-    (with-open [con (.getMetaData (jdbc/get-connection db))]
+    (with-open [con (jdbc/get-connection db)]
       (.getMetaData con))
     (.getMetaData db)))
 
