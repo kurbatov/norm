@@ -33,6 +33,9 @@
   (is (= "\"user\".id" (f/format-value :user/id)))
   (is (= "?" (f/format-value 0)))
   (is (= "?" (f/format-value "string")))
+  (is (= "NOW()" (f/format-value '(now))))
+  (is (= "MAX(?, ?)" (f/format-value '(max 1 3))))
+  (is (= "MAX(working, done)" (f/format-value '(max :working :done))))
   (is (= "(SELECT id AS \"id\" FROM users AS \"users\" WHERE (role = ?))"
          (f/format-value (sql/select nil :users [:id] {:role "admin"})))))
 
@@ -131,14 +134,18 @@
     (testing "from fields"
       (is (= [] (f/extract-values [:id :name])))
       (is (= [] (f/extract-values [[:user/id :id] [:person/name :name]])))
+      (is (= [] (f/extract-values [['(now) :now]])))
       (is (= [] (f/extract-values [['(count :id) :count]])))
-      (is (= [","] (f/extract-values [['(string-agg :id ",") :count]]))))
+      (is (= [","] (f/extract-values [['(string-agg :id ",") :ids]]))))
     (testing "from clause"
       (is (= [] (f/extract-values {})))
       (is (= [1] (f/extract-values {:id 1})))
       (is (= [] (f/extract-values {:id nil})))
       (is (= [] (f/extract-values {:active true})))
       (is (= [] (f/extract-values {:user/id :employee/id})))
+      (is (= [] (f/extract-values {:in-progress [:> :done]})))
+      (is (= [] (f/extract-values {:start [:> '(now)]})))
+      (is (= [","] (f/extract-values {:ids '(string-agg :id ",")})))
       (is (= [1 "John"] (f/extract-values {:id 1 :name "John"})))
       (is (= [1 "John%"] (f/extract-values {:id 1 :name [:like "John%"]})))
       (is (= ["John%" "1980-01-01" "1990-01-01"] (f/extract-values {:name [:like "John%"] :birthday [:between "1980-01-01" "1990-01-01"]})))

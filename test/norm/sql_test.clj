@@ -39,7 +39,8 @@
         "Wildcard should go without alias.")
     (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\" FROM users AS \"user\" WHERE (\"user\".id IN ((SELECT user_id AS \"user-id\" FROM employees AS \"employees\" WHERE (active IS true))))"
            (str (sql/select nil [:users :user] [:user/id :user/login] {:user/id [:in (sql/select nil :employees [:user-id] {:active true})]}))))
-    (is (= "SELECT CURRENT_SCHEMA() AS \"current-schema\"" (str (sql/select nil nil [['(current-schema) :current-schema]])))))
+    (is (= "SELECT CURRENT_SCHEMA() AS \"current-schema\"" (str (sql/select nil nil [['(current-schema) :current-schema]]))))
+    (is (= "SELECT id AS \"id\" FROM tasks AS \"tasks\" WHERE (scheduled >= NOW())" (str (sql/select nil :tasks [:id] {:scheduled [:>= '(now)]})))))
   (testing "Query parts amendment"
     (let [query (sql/select nil :users [:id :name])]
       (is (= "SELECT id AS \"id\", name AS \"name\" FROM users AS \"users\" WHERE (id = ?)" (-> query (where {:id 1}) str)))

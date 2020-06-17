@@ -55,13 +55,21 @@
      (str (sql-quote (namespace x)) "." (name x))
      (name x))))
 
+(defn proc-call? [x] (and (list? x) (symbol? (first x))))
+
+(declare format-proc-call)
+
 (defn format-value [x]
   (cond
     (nil? x) "NULL"
     (boolean? x) x
     (keyword? x) (format-keyword-quoted x)
+    (proc-call? x) (format-proc-call x)
     (satisfies? core/Query x) (wrap (str x))
     :else "?"))
+
+(defn format-proc-call [x]
+  (wrapper (str/upper-case (*->db-case* (first x))) (->> (rest x) (map format-value) (str/join ", "))))
 
 (defn format-alias [x]
   (if (keyword? x)
@@ -76,7 +84,7 @@
      (keyword? field) (format-keyword-quoted field)
      (list? field) (if (contains? predicates (first field))
                      (wrap (apply (get predicates (first field)) (format-field (second field)) (map format-value (nnext field))))
-                     (wrapper (str/upper-case (*->db-case* (first field))) (->> (rest field) (map format-value) (str/join ", "))))
+                     (format-proc-call field))
      (vector? field) (apply format-field field)
      :else field))
   ([field alias]
@@ -200,6 +208,7 @@
   (cond
     (map-entry? v) (extract-value (val v))
     (map? v) (map extract-value v)
+    (proc-call? v) (->> (rest v) (mapv extract-value))
     (and (coll? v) (keyword? (first v))) (->> (rest v) (mapv extract-value))
     (satisfies? core/Query v) (cond-> (extract-values (:where v))
                                 (:limit v) (conj (:limit v))
