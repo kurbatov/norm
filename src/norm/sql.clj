@@ -454,7 +454,10 @@
 ;; SQL repository
 
 (def sql-repository-meta
-  {`core/add-entity
+  {`core/transaction
+   (fn [this]
+     (transaction (:db (meta this))))
+   `core/add-entity
    (fn add-entity [this entity]
      (let [r (promise)]
        (->> (assoc this (:name entity) entity)

@@ -232,6 +232,18 @@
 (defprotocol Repository
   "Collection of inter-related entities."
   :extend-via-metadata true
+  (transaction [repository]
+    "Returns an empty transaction for the repository.
+     Commands and queries may be appended into transaction using `conj` or `norm.core/then`.
+     Transaction may be executed using `norm.core/execute!`.
+     
+     Example:
+     ```
+     (-> (transaction repository)
+         (conj (create (:user repository) {:login \"admin\"}))
+         (then (create (:person repository) {:name \"John Doe\"}))
+         execute!)
+     ```")
   (add-entity [repository entity]
     "Returns new repository with additional entity.
      Replaces an entity with the same name if already exists.")

@@ -7,6 +7,9 @@
             [norm.sql.jdbc :refer [instance-meta]]
             [norm.sql.specs :as sql.specs]))
 
+(defn contains-all? [m & ks]
+  (= (clojure.set/intersection (set ks) (set (keys m))) (set ks)))
+
 (deftest sql-query-test
   (testing "Query building"
     (is (= "SELECT * FROM users AS \"users\"" (str (sql/select nil :users))))
@@ -310,10 +313,17 @@ WHERE er.employee_id IS NULL)"])
       (is (= [:person :contact] (keys (norm/only repository [:person :contact]))) "Only specified entities must be present.")
       (is (= [:person :contact :user] (keys (norm/except repository [:user-secret :employee :responsibility])))
           "Specified entities must be absent.")
-      (testing "Fields populated."
+      (testing "Fields population."
         (is (= [:id :name :gender :birthday] (get-in repository [:person :fields])))
         (is (= [:id :person-id :type :value] (get-in repository [:contact :fields])))
         (is (= [:id :login :role :active] (get-in repository [:user :fields]))))
+      (testing "Transaction creation"
+        (is (= [] (norm/transaction repository))
+            "New transaction should be empty.")
+        #_(is (satisfies? norm/Command (norm/transaction repository))
+              "Transaction should be a command."); https://ask.clojure.org/index.php/4622/satisfies-doesnt-work-instance-based-protocol-polymorphism
+        (is (apply contains-all? (meta (norm/transaction repository)) (keys sql/sql-command-meta))
+            "Transaction should be a command."))
       (testing "SQL generation"
         (is (= "SELECT \"user\".id AS \"user/id\", \"user\".login AS \"user/login\", \"user\".role AS \"user/role\", \"user\".active AS \"user/active\", \"user.person\".id AS \"user.person/id\", \"user.person\".name AS \"user.person/name\", \"user.person\".gender AS \"user.person/gender\", \"user.person\".birthday AS \"user.person/birthday\" FROM (users AS \"user\" LEFT JOIN people AS \"user.person\" ON (\"user\".id = \"user.person\".id))"
                (str (norm/find (:user repository)))))
