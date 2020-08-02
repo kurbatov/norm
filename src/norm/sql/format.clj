@@ -55,21 +55,10 @@
      (str (sql-quote (namespace x)) "." (name x))
      (name x))))
 
-(defn proc-call? [x] (and (list? x) (symbol? (first x))))
-
-(declare format-proc-call)
-
-(defn format-value [x]
-  (cond
-    (nil? x) "NULL"
-    (boolean? x) x
-    (keyword? x) (format-keyword-quoted x)
-    (proc-call? x) (format-proc-call x)
-    (satisfies? core/Query x) (wrap (str x))
-    :else "?"))
+(declare format-field)
 
 (defn format-proc-call [x]
-  (wrapper (str/upper-case (*->db-case* (first x))) (->> (rest x) (map format-value) (str/join ", "))))
+  (wrapper (str/upper-case (*->db-case* (first x))) (->> (rest x) (map format-field) (str/join ", "))))
 
 (defn format-alias [x]
   (if (keyword? x)
@@ -81,14 +70,21 @@
 (defn format-field
   ([field]
    (cond
+     (nil? field) "NULL"
+     (boolean? field) field
      (keyword? field) (format-keyword-quoted field)
      (list? field) (if (contains? predicates (first field))
-                     (wrap (apply (get predicates (first field)) (format-field (second field)) (map format-value (nnext field))))
+                     (apply (get predicates (first field)) (map format-field (next field)))
                      (format-proc-call field))
      (vector? field) (apply format-field field)
-     :else field))
+     (satisfies? core/Query field) (wrap (str field))
+     :else "?"))
   ([field alias]
-   (infix (format-field field) "AS" (sql-quote (format-alias alias)))))
+   (let [formatted (format-field field)
+         formatted (if (and (not= (last formatted) \)) (str/includes? formatted " "))
+                     (wrap formatted)
+                     formatted)]
+     (infix formatted "AS" (sql-quote (format-alias alias))))))
 
 ;; Predicates
 
@@ -108,6 +104,10 @@
 (defn pred-< [k v]        (infix k "<" v))
 (defn pred->= [k v]       (infix k ">=" v))
 (defn pred-<= [k v]       (infix k "<=" v))
+(defn pred-+ [& args]     (group " + " args))
+(defn pred-- [& args]     (group " - " args))
+(defn pred-* [& args]     (group " * " args))
+(defn pred-div [& args]   (group " / " args))
 (defn pred-and [& args]   (group " AND " args))
 (defn pred-or [& args]    (group " OR " args))
 (defn pred-not [v]        (wrapper "NOT" v))
@@ -130,6 +130,10 @@
                       '<       pred-<
                       '>=      pred->=
                       '<=      pred-<=
+                      '+       pred-+
+                      '-       pred--
+                      '*       pred-*
+                      '/       pred-div
                       'not=    pred-not=
                       '=       pred-=}
         predicates-k (into {} (map (fn [[k v]] {(keyword k) v}) predicates-s))]
@@ -142,9 +146,9 @@
     (apply k (map convert-clause-map-entry v))
     (if (coll? v)
       (if (fn? (first v))
-        (apply (first v) (format-field k) (map format-value (rest v)))
-        (apply pred-in (format-field k) (map format-value v)))
-      (pred-= (format-field k) (format-value v)))))
+        (apply (first v) (format-field k) (map format-field (rest v)))
+        (apply pred-in (format-field k) (map format-field v)))
+      (pred-= (format-field k) (format-field v)))))
 
 (defn- convert-clause-map [x]
   (if (map? x)
@@ -206,13 +210,13 @@
 
 (defn- extract-value [v]
   (cond
-    (map-entry? v) (extract-value (val v))
-    (map? v) (map extract-value v)
-    (proc-call? v) (->> (rest v) (mapv extract-value))
-    (and (coll? v) (keyword? (first v))) (->> (rest v) (mapv extract-value))
-    (satisfies? core/Query v) (cond-> (extract-values (:where v))
+    (satisfies? core/Query v) (cond-> (extract-values (:fields v))
+                                (:where v) (into (extract-values (:where v)))
+                                (:having v) (into (extract-values (:having v)))
                                 (:limit v) (conj (:limit v))
                                 (:offset v) (conj (:offset v)))
+    (map-entry? v) (extract-value (val v))
+    (or (map? v) (coll? v)) (map extract-value v)
     :else v))
 
 (defn extract-values [clause]

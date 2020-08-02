@@ -28,12 +28,12 @@
         values (if batch (rest values) [(vals values)])]
     (str "INSERT INTO " (f/format-target target) " "
          (f/group ", " (map f/format-field fields))
-         " VALUES " (->> values (map #(->> % (map f/format-value) (f/group ", "))) (str/join ", ")))))
+         " VALUES " (->> values (map #(->> % (map f/format-field) (f/group ", "))) (str/join ", ")))))
 
 (defmethod generate-sql-command :update [{:keys [target values where]}]
   (str "UPDATE " (f/format-target target)
        " SET " (->> values
-                    (map #(str (f/format-field (key %)) " = " (f/format-value (val %))))
+                    (map #(str (f/format-field (key %)) " = " (f/format-field (val %))))
                     (str/join ", "))
        (when where (str " WHERE " (f/format-clause where)))))
 
@@ -124,11 +124,7 @@
 (defrecord SQLQuery [source fields where order offset limit jdbc-opts]
   core/Command
   (execute! [this]
-    (let [values (cond-> (f/extract-values fields)
-                   where (into (f/extract-values where))
-                   (:having this) (into (f/extract-values (:having this)))
-                   limit (conj limit)
-                   offset (conj offset))
+    (let [values (f/extract-values [this])
           query (apply vector (str this) values)
           {:keys [db transform]} (meta this)]
       (cond->> (jdbc/execute! db query (merge default-jdbc-opts jdbc-opts))
@@ -252,7 +248,7 @@
         source (build-source entity ks)
         opts (cond-> {:builder-fn as-entity-maps :entity entity}
                transform (assoc :transform transform))]
-    (select (:db (meta entity)) source fields where nil nil nil opts)))
+    (select (:db (meta entity)) source fields where (:order entity) nil nil opts)))
 
 (defn- filtered-by-rel
   "Determines if the `clause` map contains a keyword prefixed by one of `rel-keys`."

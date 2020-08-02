@@ -156,7 +156,8 @@
         (is (= {:id 2} (-> (norm/create person {:name "Jane Doe" :gender "female"}) norm/execute!)))
         (is (= {:id 1} (-> (norm/create user {:id 1 :login "john" :role "user"}) norm/execute!))))
       (testing "fetching"
-        (is (= {:id 1 :name "John Doe" :gender "male"} (norm/fetch-by-id! person 1)))
+        (is (= {:id 1 :name "John Doe" :gender "male"} (norm/fetch-by-id! person 1))
+            (str (norm/find person {:id 1})))
         (is (= (merge instance-meta {:entity person}) (-> (norm/fetch-by-id! person 1) meta))
             "Metadata of an instance must contain an implementation of the `Instance `protocol and a reference to the entity.")
         (is (= [{:id 1 :name "John Doe" :gender "male"}

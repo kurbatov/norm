@@ -27,18 +27,6 @@
   (is (= {:or {:user/id 1 :user/login "user"}} (f/ensure-prefixed :user {:or {:id 1 :login "user"}}))
       "Predicates should not be prefixed."))
 
-(deftest format-value-test
-  (is (= "NULL" (f/format-value nil)))
-  (is (= "id" (f/format-value :id)))
-  (is (= "\"user\".id" (f/format-value :user/id)))
-  (is (= "?" (f/format-value 0)))
-  (is (= "?" (f/format-value "string")))
-  (is (= "NOW()" (f/format-value '(now))))
-  (is (= "MAX(?, ?)" (f/format-value '(max 1 3))))
-  (is (= "MAX(working, done)" (f/format-value '(max :working :done))))
-  (is (= "(SELECT id AS \"id\" FROM users AS \"users\" WHERE (role = ?))"
-         (f/format-value (sql/select nil :users [:id] {:role "admin"})))))
-
 (deftest format-alias-test
   (is (= "id" (f/format-alias :id)) "Alias unquoted.")
   (is (= "person/id" (f/format-alias :person/id)) "Namespace separated with a slash.")
@@ -47,20 +35,34 @@
   (is (= "person.id" (f/format-alias "person.id")) "String aliases stay as is."))
 
 (deftest format-field-test
+  (is (= "NULL" (f/format-field nil)) "nil should be inlined")
   (is (= "id" (f/format-field :id)) "Plain field doesn't get quoted.")
   (is (= "\"user\".id" (f/format-field :user/id)) "Namespace is a quoted prefix.")
   (is (= "name AS \"full-name\"" (f/format-field :name :full-name)) "Alias gets quoted.")
   (is (= "name AS \"full-name\"" (f/format-field [:name :full-name])) "Aliased field may be supplied as a vector.")
   (is (= "\"employee\".name AS \"full-name\"" (f/format-field :employee/name :full-name)))
   (is (= "\"employee\".name AS \"user/full-name\"" (f/format-field :employee/name :user/full-name)))
-  (is (= "CURRENT_SCHEMA()" (f/format-field '(current-schema))) "Stored procedure should be formatted.")
-  (is (= "CURRENT_SCHEMA() AS \"current-schema\"" (f/format-field ['(current-schema) :current-schema])) "Stored procedure should be aliased")
+  (is (= "NOW()" (f/format-field '(now))) "Stored procedure without arguments should be inlined.")
+  (is (= "MAX(?, ?)" (f/format-field '(max 1 3))) "Constant arguments of stored procedure should be parametrized.")
+  (is (= "MAX(working, done)" (f/format-field '(max :working :done))) "Fields should be inlined in stored procedure arguments.")
   (is (= "COUNT(id)" (f/format-field '(count :id))) "Aggregation should be applied.")
   (is (= "COUNT(\"user\".id)" (f/format-field '(count :user/id))) "Namespace gets quoted inside an aggregation.")
+  (is (= "CURRENT_SCHEMA() AS \"current-schema\"" (f/format-field ['(current-schema) :current-schema])) "Stored procedure should be aliased")
   (is (= "COUNT(id) AS \"count\"" (f/format-field ['(count :id) :count])) "Aggregation is aliased")
   (is (= "COUNT(\"user\".id) AS \"user/count\"" (f/format-field ['(count :user/id) :user/count])))
   (is (= "STRING_AGG(\"cu\".column_name, ?) AS \"column-list\"" (f/format-field ['(string-agg :cu/column-name ",") :column-list])))
-  (is (= "(\"employee\".id IS NOT NULL) AS \"employee\"" (f/format-field ['(not= :employee/id nil) :employee]))))
+  (is (= "(\"employee\".id IS NOT NULL) AS \"employee\"" (f/format-field ['(not= :employee/id nil) :employee])))
+  (is (= "(debit AND true)"
+         (f/format-field '(and :debit true))))
+  (is (= "COALESCE((debit AND true), ?) AS \"remainder\""
+         (f/format-field ['(coalesce (and :debit true) -1) :remainder])))
+  (is (= "SUM((amount * ISNULL((debit_place_id / debit_place_id), ?))) AS \"remainder\""
+         (f/format-field ['(sum (* :amount (isnull (/ :debit-place-id :debit-place-id) -1))) :remainder])))
+  (is (= "?" (f/format-field 0)) "Constant should be represented by a placeholder.")
+  (is (= "?" (f/format-field "string") "Constant should be represented by a placeholder."))
+  (is (= "(SELECT id AS \"id\" FROM users AS \"users\" WHERE (role = ?))"
+         (f/format-field (sql/select nil :users [:id] {:role "admin"}))
+         "Query should be wrapped in parens.")))
 
 (deftest format-clause-test
   (is (= "(id = ?)" (f/format-clause {:id 1})))
@@ -157,5 +159,8 @@
       (is (= [] (f/extract-values [:users :user])))
       (is (= [] (f/extract-values [[:users :user] :left-join [:people :person] {:user/id :person/id}])))
       (is (= ["John"] (f/extract-values [[:users :user] :left-join [:users :sub] {:user/id :sub/supervisor-id :user/name "John"}]))))
+    (testing "from query"
+      (is (= [] (f/extract-values (sql/select nil :users [:id]))))
+      (is (= ["admin" 60 20] (f/extract-values [(sql/select nil :users [:id] {:role "admin"} {:id :asc} 20 60)]))))
     (testing "from sub-query"
-      (is (= ["admin" 20 60] (f/extract-values {:id [:in (sql/select nil :users [:id] {:role "admin"} {:id :asc} 20 60)]}))))))
+      (is (= ["admin" 60 20] (f/extract-values {:id [:in (sql/select nil :users [:id] {:role "admin"} {:id :asc} 20 60)]}))))))
