@@ -264,7 +264,15 @@
                                           :fk :responsibility-id
                                           :rfk :employee-id
                                           :join-table :employees-responsibilities-negative
-                                          :filter {:active true}}}}})
+                                          :filter {:active true}}}}
+   :document {:table :documents
+              :rels {:items {:entity :doc-item
+                             :type :has-many
+                             :fk :doc-id}}}
+   :doc-item {:table :doc-items
+              :rels {:document {:entity :document
+                                :type :belongs-to
+                                :fk :doc-id}}}})
 
 (deftest create-repository-test
   (sql.specs/instrument)
@@ -283,6 +291,8 @@ FROM (employees AS e CROSS JOIN responsibilities AS r)
 LEFT JOIN employees_responsibilities AS er
 ON er.responsibility_id = r.id AND er.employee_id = e.id
 WHERE er.employee_id IS NULL)"])
+    (jdbc/execute! conn ["CREATE TABLE documents (id BIGSERIAL PRIMARY KEY, type VARCHAR(100), status VARCHAR (100), sum NUMBER(19,4), created_at DATE)"])
+    (jdbc/execute! conn ["CREATE TABLE doc_items (id BIGSERIAL PRIMARY KEY, doc_id BIGINT REFERENCES documents (id), line_number INT, ordered INT, shipped INT)"])
     (jdbc/execute! conn ["INSERT INTO people (name, gender) VALUES ('John Doe', 'male')"])
     (jdbc/execute! conn ["INSERT INTO people (name, gender) VALUES ('Jane Doe', 'female')"])
     (jdbc/execute! conn ["INSERT INTO people (name, gender) VALUES ('Zoe Doe', 'female')"])
@@ -312,7 +322,7 @@ WHERE er.employee_id IS NULL)"])
       (is (= repository @(:repository (meta (:person repository)))) "Entity must have repository in metadata.")
       (is (= (keys entities) (keys repository)) "All the entities should be presented in the repository.")
       (is (= [:person :contact] (keys (norm/only repository [:person :contact]))) "Only specified entities must be present.")
-      (is (= [:person :contact :user] (keys (norm/except repository [:user-secret :employee :responsibility])))
+      (is (= [:person :contact :user :document :doc-item] (keys (norm/except repository [:user-secret :employee :responsibility])))
           "Specified entities must be absent.")
       (testing "Fields population."
         (is (= [:id :name :gender :birthday] (get-in repository [:person :fields])))
@@ -374,17 +384,35 @@ WHERE er.employee_id IS NULL)"])
             "Fields in ORDER clause must not be modified for exact values."))
       (testing "creation"
         (testing "with embedded entities"
-          (is (= {:id 4}
-                 (-> (norm/create
-                      (:user-secret repository)
-                      {:secret "sha256xxxx"
-                       :user {:login "buzz.lightyear"
-                              :active false
-                              :person {:name "Buzz Lightyear"}}})
-                     norm/execute!)))
-          (is (= {:id 4 :secret "sha256xxxx"} (norm/fetch-by-id! (:user-secret repository) 4)))
-          (is (= {:id 4 :login "buzz.lightyear" :active false :person {:id 4 :name "Buzz Lightyear"}}
-                 (norm/fetch-by-id! (:user repository) 4))))
+          (testing "of belongs-to relationship"
+            (is (= {:id 4}
+                   (-> (norm/create
+                        (:user-secret repository)
+                        {:secret "sha256xxxx"
+                         :user {:login "buzz.lightyear"
+                                :active false
+                                :person {:name "Buzz Lightyear"}}})
+                       norm/execute!)))
+            (is (= {:id 4 :secret "sha256xxxx"} (norm/fetch-by-id! (:user-secret repository) 4)))
+            (is (= {:id 4 :login "buzz.lightyear" :active false :person {:id 4 :name "Buzz Lightyear"}}
+                   (norm/fetch-by-id! (:user repository) 4))))
+          (testing "of has-many relationship"
+            (is (= {:id 1}
+                   (norm/create! (:document repository)
+                                 {:type "test"
+                                  :status "new"
+                                  :sum 1000
+                                  :items [{:line-number 1
+                                           :ordered 10}
+                                          {:line-number 2
+                                           :ordered 20}
+                                          {:line-number 3
+                                           :ordered 30}]})))
+            (is (= {:id 1 :type "test" :status "new" :sum 1000.0000M} (norm/fetch-by-id! (:document repository) 1)))
+            (is (= 3
+                   (-> (:doc-item repository)
+                       (norm/find! {:doc-id 1})
+                       count)))))
         (testing "with prepare function"
           (let [person (assoc (:person repository) :prepare #(update % :name str/upper-case))]
             (is (= {:id 5} (norm/create! person {:name "Sid" :gender "male"})))
@@ -471,13 +499,24 @@ WHERE er.employee_id IS NULL)"])
         (is (= [{:id 1, :secret "sha256(xxxxxxx)"}] (-> (norm/find (:user-secret repository) {:user/login "john.doe"}) fetch!))))
       (testing "update"
         (testing "with embedded entities"
-          (is (= 1 (norm/update! (:user repository) {:person {:name "Buzz"}} {:id 4})))
-          (is (= {:id 4 :name "Buzz"} (norm/fetch-by-id! (:person repository) 4))
-              "Updating of an embedded entity must change the entity.")
-          (is (= 2 (norm/update! (:user repository) {:role "user" :person {:name "Buzz Lightyear"}} {:id 4})))
-          (is (= {:id 4 :login "buzz.lightyear" :role "user" :active false :person {:id 4, :name "Buzz Lightyear"}}
-                 (norm/fetch-by-id! (:user repository) 4))
-              "Updating with an embedded entity must change both the main and embedded entity."))
+          (testing "of belongs-to relationship"
+            (is (= 1 (norm/update! (:user repository) {:person {:name "Buzz"}} {:id 4})))
+            (is (= {:id 4 :name "Buzz"} (norm/fetch-by-id! (:person repository) 4))
+                "Updating of an embedded entity must change the entity.")
+            (is (= 2 (norm/update! (:user repository) {:role "user" :person {:name "Buzz Lightyear"}} {:id 4})))
+            (is (= {:id 4 :login "buzz.lightyear" :role "user" :active false :person {:id 4, :name "Buzz Lightyear"}}
+                   (norm/fetch-by-id! (:user repository) 4))
+                "Updating with an embedded entity must change both the main and embedded entity."))
+          (testing "of has-many relationship"
+            (is (= 4 (norm/update! (:document repository)
+                                   {:status "shipped"
+                                    :items [{:id 1 :shipped 0}
+                                            {:id 2 :shipped 20}
+                                            {:id 3 :shipped 10}]}
+                                   {:id 1})))
+            (is (= "shipped" (-> (:document repository) (norm/fetch-by-id! 1) :status)) "Aggregation root must be updated.")
+            (is (= 0 (-> (:doc-item repository) (norm/fetch-by-id! 1) :shipped)) "Component of aggregation must be updated.")
+            (is (= 20 (-> (:doc-item repository) (norm/fetch-by-id! 2) :shipped)) "Component of aggregation must be updated.")))
         (testing "filtered by relationship"
           (is (= 1 (norm/update! (:user repository) {:login "buzz"} {:person/name "Buzz Lightyear"})))
           (is (= {:id 4 :login "buzz" :role "user" :active false :person {:id 4, :name "Buzz Lightyear"}}

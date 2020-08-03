@@ -267,7 +267,9 @@
           embedded-rels (filter (comp (partial contains? data) key) rels)
           instance (apply dissoc data (map key embedded-rels))
           dependencies (filter (comp (partial = :belongs-to) :type val) embedded-rels)
-          dependents (filter (comp (partial = :has-one) :type val) embedded-rels)
+          dependents (->> embedded-rels
+                          (filter (comp #{:has-one :has-many} :type val))
+                          (filter (complement (comp :join-table val))))
           into-creation (fn into-creation [[k v]]
                           (-> (core/create ((:entity v) repository) (k data))
                               (vary-meta assoc :relation v)))
@@ -289,16 +291,19 @@
           create-this (cond-> (vary-meta create-this assoc :entity this)
                         (not-empty embedded-rels) (vary-meta assoc :tx-result true))
           create-dependents (->> dependents
-                                 (map (fn [[k v]]
-                                        (let [entity ((:entity v) repository)
-                                              instance (k data)]
-                                          (if (pk data)
-                                            (core/create entity (assoc instance (:fk v) (pk data)))
-                                            (fn create-dependent [results]
-                                              (->> (nth results owner-idx)
-                                                   pk
-                                                   (assoc instance (:fk v))
-                                                   (core/create entity)))))))
+                                 (map (juxt (comp repository :entity val) (comp :fk val) (comp data key)))
+                                 (mapcat (fn [[entity fk instance :as v]]
+                                           (if (vector? instance)
+                                             (for [i instance] [entity fk i])
+                                             [v])))
+                                 (map (fn [[entity fk instance]]
+                                        (if (pk data)
+                                          (core/create entity (assoc instance fk (pk data)))
+                                          (fn create-dependent [results]
+                                            (->> (nth results owner-idx)
+                                                 pk
+                                                 (assoc instance fk)
+                                                 (core/create entity))))))
                                  (map #(vary-meta % assoc :tx-propagation true)))]
       (if (empty? embedded-rels)
         create-this
@@ -373,17 +378,24 @@
                                          (core/update entity patch {pk ids}))))))
                             (map #(vary-meta % assoc :tx-propagation true)))
           dependents (->> embedded-rels
-                          (filter (comp (partial = :has-one) :type val))
-                          (map (fn [[k v]]
-                                 (let [{:keys [entity fk]} v
-                                       entity (entity repository)
-                                       patch (dissoc (k patch) (:pk entity))]
+                          (filter (comp #{:has-one :has-many} :type val))
+                          (filter (complement (comp :join-table val)))
+                          (map (juxt (comp repository :entity val) (comp :fk val) (comp patch key)))
+                          (mapcat (fn [[entity fk patch :as v]]
+                                    (if (vector? patch)
+                                      (for [i patch] [entity fk i])
+                                      [v])))
+                          (map (fn [[entity fk patch]]
+                                 (let [patch-id ((:pk entity) patch)
+                                       patch (dissoc patch (:pk entity))]
                                    (fn [results]
                                      (let [ids (->> (first results) (map pk) set)
-                                           ids (if (= 1 (count ids)) (first ids) (into [] ids))]
-                                       (core/update entity patch {fk ids}))))))
+                                           ids (if (= 1 (count ids)) (first ids) (into [] ids))
+                                           clause (cond-> {fk ids}
+                                                    patch-id (assoc (:pk entity) patch-id))]
+                                       (core/update entity patch clause))))))
                           (map #(vary-meta % assoc :tx-propagation true)))
-          instance (apply dissoc patch (map key embedded-rels))
+          instance (apply dissoc patch (keys embedded-rels))
           base-command (when (not-empty instance)
                          (if initial-select
                            #(update db table instance {pk (->> (first %) (mapv pk))})
