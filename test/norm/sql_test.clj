@@ -412,7 +412,24 @@ WHERE er.employee_id IS NULL)"])
             (is (= 3
                    (-> (:doc-item repository)
                        (norm/find! {:doc-id 1})
-                       count)))))
+                       count))))
+          (testing "of many to many relationship"
+            (is (= {:id 4}
+                   (norm/create! (:employee repository)
+                                 {:id 4
+                                  :salary 1000
+                                  :responsibilities [{:id 2} {:title "Saving the world"}]})))
+            (is (= {:id 4 :salary 1000.0000M :person {:id 4 :name "Buzz Lightyear"} :active true}
+                   (norm/fetch-by-id! (:employee repository) 4))
+                "Aggregation root must be saved")
+            (is (= {:id 5 :title "Saving the world" :active true}
+                   (norm/fetch-by-id! (:responsibility repository) 5))
+                "Related entity must be created.")
+            (is (= [{:id 2 :title "Watering plants" :active true}
+                    {:id 5 :title "Saving the world" :active true}]
+                   (norm/find-related! (:employee repository) :responsibilities {:id 4}))
+                "Pre-existed and created entities must be referenced.")
+            ))
         (testing "with prepare function"
           (let [person (assoc (:person repository) :prepare #(update % :name str/upper-case))]
             (is (= {:id 5} (norm/create! person {:name "Sid" :gender "male"})))
@@ -471,7 +488,7 @@ WHERE er.employee_id IS NULL)"])
         (is (= 2 (-> (norm/find-related (:employee repository) :responsibilities {:id 1}) fetch-count!)))
         (is (= [{:id 1, :title "Cleaning", :active true} {:id 3, :title "Gardening", :active true}]
                (-> (norm/find-related (:employee repository) :responsibilities {:id 1}) fetch!)
-               (-> (norm/find-related (:employee repository) :nonresponsibilities {:id 2}) fetch!)))
+               (-> (norm/find-related (:employee repository) :nonresponsibilities {:id 4}) fetch!)))
         (is (= [{:id 1 :salary 1500.0000M :active true :person {:id 1 :name "John Doe" :gender "male"}}]
                (-> (norm/find-related (:responsibility repository) :employees {:id 1}) fetch!)
                (-> (norm/find-related (:responsibility repository) :employees {:id 3}) fetch!)

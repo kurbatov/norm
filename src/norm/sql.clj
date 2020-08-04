@@ -304,12 +304,31 @@
                                                  pk
                                                  (assoc instance fk)
                                                  (core/create entity))))))
-                                 (map #(vary-meta % assoc :tx-propagation true)))]
+                                 (map #(vary-meta % assoc :tx-propagation true)))
+          create-cross-dependencies (->> embedded-rels
+                                         (filter (comp #{:has-many} :type val))
+                                         (filter (comp :join-table val))
+                                         (map (juxt (comp repository :entity val) key (comp data key)))
+                                         (mapcat (fn [[entity rel-key instances]] (for [i instances] [entity rel-key i])))
+                                         (mapcat (fn [[entity rel-key instance]]
+                                              (let [rfk-key (:pk entity)
+                                                    rfk (rfk-key instance)
+                                                    fk (pk data)]
+                                                (if (and fk rfk)
+                                                  [(core/create-relation this fk rel-key rfk)]
+                                                  [(when-not rfk (core/create entity instance))
+                                                   (fn create-relation [results]
+                                                     (let [fk (or fk (pk (nth results owner-idx)))
+                                                           rfk (or rfk (rfk-key (last results)))]
+                                                       (core/create-relation this fk rel-key rfk)))]))))
+                                         (filter some?)
+                                         (map #(vary-meta % assoc :tx-propagation true)))]
       (if (empty? embedded-rels)
         create-this
         (-> create-dependencies
             (core/then create-this)
-            (into create-dependents)))))
+            (into create-dependents)
+            (into create-cross-dependencies)))))
   (fetch-by-id! [this id] (-> (core/find! this {(or pk :id) id}) first))
   (find [this] (core/find this nil))
   (find [this where] (build-query this where true))
