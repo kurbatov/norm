@@ -59,10 +59,10 @@
   (is (= "SUM((amount * ISNULL((debit_place_id / debit_place_id), ?))) AS \"remainder\""
          (f/format-field ['(sum (* :amount (isnull (/ :debit-place-id :debit-place-id) -1))) :remainder])))
   (is (= "?" (f/format-field 0)) "Constant should be represented by a placeholder.")
-  (is (= "?" (f/format-field "string") "Constant should be represented by a placeholder."))
+  (is (= "?" (f/format-field "string")) "Constant should be represented by a placeholder.")
   (is (= "(SELECT id AS \"id\" FROM users AS \"users\" WHERE (role = ?))"
-         (f/format-field (sql/select nil :users [:id] {:role "admin"}))
-         "Query should be wrapped in parens.")))
+         (f/format-field (sql/select nil :users [:id] {:role "admin"})))
+      "Query should be wrapped in parens."))
 
 (deftest format-clause-test
   (is (= "(id = ?)" (f/format-clause {:id 1})))
