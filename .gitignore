@@ -14,3 +14,5 @@ pom.xml.asc
 .project
 .settings
 .vscode
+.calva
+.clj-kondo
