@@ -100,23 +100,45 @@ call or when called with a function that has the `!` suffix.
 ```clojure
 (let [page 0
       size 40
-      sort :name
+      sort :role
       clause {:active true}
       query (-> (norm/find (:employee repository) clause)
                 ;; (norm/where clause) may be here when clause is not specified above
                 (norm/order sort)
                 (norm/skip (* page size))
                 (norm/limit size))
-      total (norm/fetch-count! query)
-      employees (norm/fetch! query)]
+      total (norm/fetch-count! query) ;; fetches total number of the records as if limit were not specified
+      employees (norm/fetch! query)]  ;; fetches entities according to the query
   {:total total
    :employees employees})
 ```
 
 Adjust and combine commands before executing and execute them.
 
-TODO give an example of command execution and combining commands/queries
-TODO vector of commands/queries is executed in a transaction
+For example, that's how you would execute a command:
+
+```clojure
+(-> (:user repository)
+    (norm/create {:login \"admin\"})
+    norm/execute!)
+
+;; or
+
+(norm/create! (:user repository) {:login \"admin\"})
+```
+
+If you want multiple commands executed in the same transaction it may be achieved using `then` function:
+
+```clojure
+(let [{:keys [user person]} repository]
+  (-> (norm/create user {:login \"admin\"})
+      (norm/then (norm/create person {:name \"John Doe\"}))
+      (norm/then #(norm/create-realtion user (:id (first $)) :preson (:id (second $))))
+      norm/execute!))
+```
+
+Unary function may be used as a command inside a transaction. It receives a vector of previous commands' results
+and is supposed to return a command (or query) built upon those data which are unknown before actual execution.
 
 ## Writing a Mapping
 
@@ -178,7 +200,7 @@ are `:entity` (the main entity is related to), `:type` (of the relation) and `:f
 `id` column of `post`'s table and there might be more than one `attachment` for one `post`.
 
 Two entities may be joined through an intermediary table that stores identifiers of both of them.
-Such table goes to `:join-table` in description of a relation. When description of a relation includes
+Such table goes to `:join-table` in the description of a relation. When description of a relation includes
 `:join-table` it must include `:rfk` (stands for *relation's foreign key*) - a column in the join-table
 which contains identifiers of related entity.
 
@@ -202,8 +224,9 @@ They relate through the join-table `employees-responsibilities`.
 
 #### Optional Properties of Relation
 
-- `:filter`
-- `:eager`
+- `:filter` - clause to filter related entities
+- `:eager` - when true, **norm** fetches a related entity eagerly (`false` by default).
+Works only for `:has-one` and `:belongs-to` relationships.
 
 ## Building Queries
 
@@ -296,7 +319,10 @@ it requires defining a record for every entity out there.
 [Hyperion](https://github.com/8thlight/hyperion) allows defining entities however dealing with
 relations may be tricky.
 
-TODO [Relational Mapper](https://github.com/netizer/relational_mapper)
+[Relational Mapper](https://github.com/netizer/relational_mapper) offers a lightweight solution for
+querying related entities based on [HoneySQL](https://github.com/seancorfield/honeysql).
+It has a namespace with functions to perform DB migrations based on the mapping.
+However it looks like creation, modification and deletion of entities is out of scope for this library.
 
 I recommend you to skip [Korma](https://github.com/korma/Korma) which is mentioned in every clojure-related
 resource for beginers. Korma is great for simple tasks but it is long abandoned and lacks some features
