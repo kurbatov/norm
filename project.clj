@@ -3,7 +3,7 @@
   :url "http://github.com/kurbatov/norm"
   :license {:name "MIT License"
             :url "https://opensource.org/licenses/MIT"}
-  :dependencies [[seancorfield/next.jdbc "1.1.610"]
+  :dependencies [[com.github.seancorfield/next.jdbc "1.2.737"]
                  [camel-snake-kebab "0.4.1"]]
   :repl-options {:init-ns norm.core
                  :caught  clojure.stacktrace/print-stack-trace}
