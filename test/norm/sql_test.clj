@@ -1,14 +1,17 @@
 (ns norm.sql-test
   (:require [clojure.test :as t :refer [deftest testing is]]
             [clojure.string :as str]
+            [clojure.set :refer [intersection]]
             [next.jdbc :as jdbc]
             [norm.core :as norm :refer [where order skip limit fetch! fetch-count!]]
             [norm.sql :as sql]
             [norm.sql.jdbc :refer [instance-meta]]
             [norm.sql.specs :as sql.specs]))
 
-(defn contains-all? [m & ks]
-  (= (clojure.set/intersection (set ks) (set (keys m))) (set ks)))
+(defn contains-all?
+  "Determines whether the map m contains all the keys ks."
+  [m & ks]
+  (= (intersection (set ks) (set (keys m))) (set ks)))
 
 (deftest sql-query-test
   (testing "Query building"

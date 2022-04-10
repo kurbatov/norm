@@ -140,22 +140,24 @@
     `data` may contain embedded properties of related entities.")
   (fetch-by-id! [entity id]
     "Fetches an instance of the entity with specified id from the storage immediately.")
-  (find ^Query [entity] ^Query [entity where] ^Query [entity fields where]
+  (find ^Query [entity] ^Query [entity clause] ^Query [entity fields clause]
     "Builds a query that provides instances of the entity when fetched.")
-  (find-related ^Query [entity relation where]
+  (find-related ^Query [entity relation clause]
     "Builds a query that provides instances of the related entity when fetched.")
-  (update ^Command [entity patch where]
+  (update ^Command [entity patch clause]
     "Builds a command that updates state of entities in the storage when executed.
-    `patch` may contain data for related entities.")
-  (delete ^Command [entity where]
-    "Builds a command that deletes entities from the storage when executed.")
+    `patch` may contain data for related entities.
+    `clause` determines the entities which are affected.")
+  (delete ^Command [entity clause]
+    "Builds a command that deletes entities from the storage when executed.
+    `clause` determines the entities which are affected.")
   (create-relation ^Command [entity id relation rel-id]
     "Builds a command that creates relation between exesting entities when executed.")
   (delete-relation ^Command [entity id relation rel-id]
     "Builds a command that deletes relation between exesting entities when executed.
     The entities will sill be presented in the storage. The command only breaks binding between them.")
-  (with-filter ^Entity [entity where]
-    "Creates a new entity based on the specified one applying the filter.
+  (with-filter ^Entity [entity clause]
+    "Creates a new entity based on the specified one filtered by `clause`.
 
     Example:
 
@@ -193,25 +195,25 @@
 (defn find!
   "Finds and fetches instances of the entity immediately."
   ([entity] (-> (find entity) fetch!))
-  ([entity where] (-> (find entity where) fetch!))
-  ([entity fields where] (-> (find entity fields where) fetch!)))
+  ([entity clause] (-> (find entity clause) fetch!))
+  ([entity fields clause] (-> (find entity fields clause) fetch!)))
 
 (defn find-related!
   "Finds and fetches instances of the related entity immediately."
-  [entity relation where]
-  (-> (find-related entity relation where) fetch!))
+  [entity relation clause]
+  (-> (find-related entity relation clause) fetch!))
 
 (defn update! 
   "Updates state of entities in the storage immediately.
   Returns the count of updated entities."
-  [entity patch where]
-  (-> (update entity patch where) execute!))
+  [entity patch clause]
+  (-> (update entity patch clause) execute!))
 
 (defn delete!
   "Deletes entities from the storage imeediately.
   Returns the count of deleted entities."
-  [entity where]
-  (-> (delete entity where) execute!))
+  [entity clause]
+  (-> (delete entity clause) execute!))
 
 (defn create-relation!
   "Creates relation immediately."

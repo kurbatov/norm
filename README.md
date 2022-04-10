@@ -18,6 +18,7 @@ There are no macros in **norm** - just data structures and functions.
 + built-in filters for the entity and its relations
 + filter by properties of related entities when selecting, updating and deleting
 + create and update aggregates in a transaction when related entities are embedded (encouraged by DDD)
++ build derived (slightly different) queries without repeating yourself
 + prepare entity data before saving
 + transform entity data after fetching
 + access to underlying Query Builder
@@ -31,17 +32,17 @@ TODO
 - create specs for entity fields from column types
 - test for MySQL support
 
-## Usage
+## Usage in a nutshell
 
 Add following dependency into the `project.clj` or `deps.edn`:
 
 ```clojure
-[norm "1.0.0"]
+[norm "0.1.0"]
 ```
 
 Also you want to ensure that there is a JDBC driver for the database of your choice
 among dependencies. **norm** supports H2 and PostgreSQL as of now, so check if at least
-one of the following is presented:
+one of the following is present:
 
 ```clojure
 [com.h2database/h2 "1.4.200"]
@@ -119,21 +120,21 @@ For example, that's how you would execute a command:
 
 ```clojure
 (-> (:user repository)
-    (norm/create {:login \"admin\"})
+    (norm/create {:login "admin"})
     norm/execute!)
 
 ;; or
 
-(norm/create! (:user repository) {:login \"admin\"})
+(norm/create! (:user repository) {:login "admin"})
 ```
 
 If you want multiple commands executed in the same transaction it may be achieved using `then` function:
 
 ```clojure
 (let [{:keys [user person]} repository]
-  (-> (norm/create user {:login \"admin\"})
-      (norm/then (norm/create person {:name \"John Doe\"}))
-      (norm/then #(norm/create-realtion user (:id (first $)) :preson (:id (second $))))
+  (-> (norm/create user {:login "admin"})
+      (norm/then (norm/create person {:name "John Doe"}))
+      (norm/then #(norm/create-relation user (:id (first $)) :preson (:id (second $))))
       norm/execute!))
 ```
 
@@ -228,23 +229,194 @@ They relate through the join-table `employees-responsibilities`.
 - `:eager` - when true, **norm** fetches a related entity eagerly (`false` by default).
 Works only for `:has-one` and `:belongs-to` relationships.
 
-## Building Queries
+## Repository
 
-### for Entities
+You can create a repository of chosen type using `norm/create-repository` function.
 
-TODO describe `norm/find`, `norm/fetch!` and `norm/fetch-by-id!`
+```clojure
+;; creating a SQL repository
+(def repository (norm/create-repository :sql entities {:db db}))
+```
 
-TODO describe `norm/where`
+Now **norm** implements only SQL repositories which are backed by relational databases.
+I would love to implement support for graph databases (Neo4j for example) and other kinds of
+non-relational databases just to check if the general concept works fine with them.
 
-TODO describe `norm/create`, `norm/update`, `norm/delete` and `norm/execute!`
+You can create a derived repository using the following methods: `norm/add-entity`, `norm/except` and
+`norm/only`. Please, refer to their documentation for details. Derived repositories can be handed over
+to different parts of an application so that they cannot construct queries for certain entities.
 
-### for Relations
+`norm/transaction` allows creating a new transaction for a repository and use this object to collect
+several queries and commands for transactional execution. Commands and queries may be appended into
+the transaction using `conj` or `norm/then`.
 
-TODO describe `norm/find-related`, `norm/create-relation` and `norm/delete-relaton`
+```clojure
+(-> (norm/transaction repository)
+    (conj (create (:user repository) {:login "admin"}))
+    (norm/then (create (:person repository) {:name "John Doe"}))
+    norm/execute!)
+```
+
+## Building Queries and Commands
+
+Most of the **norm**'s core functions generate queries and commands which do not execute immediately.
+Instead you can pass and modify those objects between different functions of an application before
+they reach the right place to be actually executed. That gives us an opportunity to split the application
+to pure functional (free from side-effects) and imperative (with side-effects) parts. All the functions
+which cause side-effects have an exclamation mark (`!`) at the end of their names.
+
+What is the benifit of **norm** commands and queries instead of just plain old SQL queries in strings?
+**norm** represents them as structured objects which can be analyzed and ajusted so that the final query
+can be built in several independent steps. **norm**'s queries allow building derived queries without
+repeating yourself and writing two slightly different queries. If you want to change one little piece
+in the middle of a query, it is easier to achieve modifying a structured object than trying to split
+a string in the right places and recombine it correctly.
+
+### Queries
+
+You can create a query using `norm/find` function specifying the entity you want and optionally
+a list of fields you are interested in and filtration criteria. `norm/fetch` can perform the query
+and fetch matching entities from the database. You can also use `norm/find!` in order to fetch
+the same entities immediately.
+
+```clojure
+(def active-users (norm/find (:user repository) {:active true}))
+(def users (norm/fetch! active-users))
+;; or
+(norm/find! (:user repository) {:active true})
+;=> [{:id 1, :login "admin", :active true}, ...]
+```
+
+If you already have a base query where you would like to specify an additional criteria, you
+can use `norm/where` function. The additional criteria is conjuncted with the existing (if any)
+using logical `and`.
+
+```clojure
+(-> active-users
+    (norm/where {:id [:< 3]})
+    norm/fetch!)
+;=> [{:id 1, ...}, {:id 2, ...}]
+```
+
+When you need a certain instance of an entity and its id is known, you can use `norm/fetch-by-id!` to
+fetch that without a lot of boilerplate.
+
+```clojure
+(norm/fetch-by-id! (:user repository) 5)
+;=> {:id 5, ...}
+```
+
+In order to fetch only related entities of an aggregate root, you can use `norm/find-related` function.
+
+```clojure
+;; getting personal info of a user with a known login
+(-> (:user repository)
+    (norm/find-related :person {:login "jdoe"})
+    norm/fetch!)
+;=> {:id 3, :name "John Doe"}
+```
+
+### Commands
+
+Commands, by contrast to the queries, modify data in the storage. Similar to queries, commands do not
+take effect immediately. In order to execute a command, use `norm/execute!` function or one of
+the following functions with an exclamation mark at the end (`!`).
+
+`norm/create` allows creating a new instance of an entity in the backing storage.
+
+```clojure
+(-> (:user repository)
+    (norm/create {:login "guest"})
+    norm/execute!)
+;=> {:id 42}
+
+;; or this way for brevity
+(norm/create! (:user repository) {:login "guest"})
+```
+
+`norm/create` accepts an aggregate with relations of the entity as the value. This way related entities are created
+in the same transaction as the aggrete root. In case if the related entity already exists and its id provided,
+a relation between newly created entity and the existing one saves in the same transaction.
+
+```clojure
+;; this call creates a new user and a related person in the same transaction
+(-> (:user repository)
+    (norm/create {:login "john", :person {:name "John Doe"}})
+    norm/execute!)
+;=> {:id 43}
+
+;; this call creates a new user and a relation to an existing person by the person's id in one transaction
+(-> (:user repository)
+    (norm/create {:login "jane", :person {:id 63}})
+    norm/execute!)
+;=> {:id 44}
+```
+
+`norm/update` updates existing entities in the storage. It takes a patch that will be applied to matched entities
+and a filtration clause as the arguments and returns a number of updated instances.
+
+```clojure
+;; activte a user with id = 42
+(-> (:user repository)
+    (norm/update {:active true} {:id 42})
+    norm/execute!)
+;=> 1
+```
+
+`norm/delete` removes entities from the storage. It takes a filtration clause as the argument and returns
+a numer of removed entities.
+
+```clojure
+;; remove all inactive users
+(-> (:user repository)
+    (norm/delete {:active false})
+    norm/execute!)
+;=> 99
+```
+
+You can manage relations between existing entities using `norm/create-relation` and `norm/delete-relaton`
+functions. They are especially useful for management of many-to-many relationships. Please, see their documentation
+for details.
 
 ### Adjusting Entities
 
-TODO describe `norm/with-filter`, `norm/with-eager` and `norm/with-relations`
+You can modify existing entity or create a derived one with the following functions.
+
+`norm/with-filter` applies a default filter to all the queries for speciied entity.
+For example, it may be useful in order to make different entities which reside in the same table
+but can be distinguished using some discriminator field.
+
+```clojure
+;; let's find top 10 incoming and outgoing documents
+(let [document (:document repository)
+      incoming (-> document (norm/with-filter {:type "incoming"}))
+      outgoing (-> document (norm/with-filter {:type "outgoing"}))]
+  {:incoming (-> (norm/find incoming) (norm/limit 10) norm/fetch!)
+   :outgoing (-> (norm/find outgoing) (norm/limit 10) norm/fetch!)})
+```
+
+`norm/with-rels` ammends relations of the specified entity (adds new or replaces an old one).
+
+ ```clojure
+ (def user-with-personal-data
+      (norm/with-rels (:user repository)
+                      {:person {:entity :person
+                                :type   :has-one
+                                :fk     :user-id
+                                :eager  true}}))
+ ```
+
+`norm/with-eager` makes specified relations to be fetched eagerly (works only for `:has-one` and
+`:belongs-to` relations). It is just a special case of `norm/with-rels` which sets `true` to
+the `:eager` property of specified relations which already exist.
+
+```clojure
+(-> (:user repository)
+    (norm/with-eager [:person])
+    (norm/where {:id 1})
+    (norm/fetch!))
+;=> {:login "admin", :person {:name "John Doe"}}
+```
 
 ### Low-Level Query Builder
 
@@ -259,7 +431,10 @@ Require the sql namespace of **norm** into a namespace in your project:
 (require '[norm.sql :as sql])
 ```
 
-TODO describe `sql/insert`, `sql/update`, `sql/select` and `sql/delete`.
+There are four functions to build different kinds of queries: `sql/insert`, `sql/update`,
+`sql/select` and `sql/delete`.
+They take a database object as the first argument and a table-name keyword as the second.
+The rest of the arguments differs for all of them so, please, refer to their docs for the details.
 
 A query object can be compiled into SQL statement with `str` call:
 
@@ -271,13 +446,66 @@ A query object can be compiled into SQL statement with `str` call:
 ;=> "SELECT id AS \"id\", login AS \"login\" FROM users WHERE (active IS true AND role = ?)"
 ```
 
-## Creating Entities
-
-TODO describe creating aggregates in a transaction
-
 ### Transactional Execution
 
-TODO describe usage of `norm/then`, `:tx-result-fn`, `:tx-result` and functions in transactions.
+`norm/then` allows combining multiple commands and queries into a single transaction.
+
+```clojure
+;; 3 users get created in the same transaction
+(let [{:keys [user]} repository]
+    (-> (norm/create user {:login "john"})
+        (norm/then (norm/create user {:login "jane"}))
+        (norm/then (norm/create user {:login "bob"}))
+        norm/execute!))
+```
+
+You can use a unary function as a command inside a transaction. It receives a vector of previous commands' results
+and is supposed to return a command (or query) built upon those data which are unknown before actual execution.
+
+```clojure
+(let [{:keys [user person]} repository]
+  (-> (norm/create user {:login "john"})
+      (norm/then (norm/create person {:name "John Doe"}))
+      (norm/then #(norm/create-relation user (:id (first $)) :preson (:id (second $))))
+      norm/execute!))
+```
+
+By default the result of transaction execution is a vector of individual commands' and queries' results.
+In case when one function generates a command/transaction and another executes it and processes the result,
+refactoring of the first function is complicated as additional commands in the transaction change the resulting vector
+of `norm/execute!`.
+
+You can explicitly manage the result of transaction execution.
+
+Assigning `{:tx-result true}`to metadata of one of the commands/queries in a transaction makes it the result provider of
+the whole transction.
+
+```clojure
+;; making result of the last query in the transaction the result of the whole transaction
+(let [{:keys [user]} repository
+      create-john (norm/create user {:login "john"})
+      create-jane (norm/create user {:login "jane"})
+      select-john-and-jane (norm/find user {:login ["john" "jane"]})]
+  (-> create-john
+      (norm/then create-jane)
+      (norm/then (vary-meta select-john-and-jane assoc :tx-result true))
+      norm/execute!))
+```
+
+`:tx-result-fn` metadata of a transaction object allows even more flexibility in modification of a transaction result
+before return from the `norm/execute!` function. It allows providing a unary function that receives a vector of results
+of individual commands in a transaction at the end of the execution and modifies the final result of the transaction.
+
+```clojure
+;; transaction execution returns a vector of id for newly created entities
+(let [{:keys [user]} repository
+      create-john (norm/create user {:login "john"})
+      create-jane (norm/create user {:login "jane"})]
+  (-> create-john
+      (norm/then create-jane)
+      (vary-meta assoc :tx-result-fn #(mapv :id %))
+      norm/execute!))
+```
 
 TODO nested transactions and `:tx-propagation`.
 
