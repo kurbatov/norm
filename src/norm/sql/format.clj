@@ -136,8 +136,18 @@
                       '/       pred-div
                       'not=    pred-not=
                       '=       pred-=}
+        predicates-f {>    pred->
+                      <    pred-<
+                      >=   pred->=
+                      <=   pred-<=
+                      +    pred-+
+                      -    pred--
+                      *    pred-*
+                      /    pred-div
+                      not= pred-not=
+                      =    pred-=}
         predicates-k (into {} (map (fn [[k v]] {(keyword k) v}) predicates-s))]
-    (merge predicates-s predicates-k)))
+    (merge predicates-s predicates-f predicates-k)))
 
 ;; Clause
 

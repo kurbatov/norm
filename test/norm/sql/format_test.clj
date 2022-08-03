@@ -67,8 +67,11 @@
 (deftest format-clause-test
   (is (= "(id = ?)" (f/format-clause {:id 1})))
   (is (= "(id <> ?)" (f/format-clause {:id [:not= 1]})))
+  (is (= "(id <> ?)" (f/format-clause {:id [not= 1]})))
+  (is (= "(id > ?)" (f/format-clause {:id [> 1]})))
   (is (= "(id IS NULL)" (f/format-clause {:id nil})))
   (is (= "(id IS NOT NULL)" (f/format-clause {:id [:not= nil]})))
+  (is (= "(id IS NOT NULL)" (f/format-clause {:id [not= nil]})))
   (is (= "(active IS true)" (f/format-clause {:active true})))
   (is (= "(active IS false)" (f/format-clause {:active false})))
   (is (= "(\"user\".id = \"employee\".id)" (f/format-clause {:user/id :employee/id})))
