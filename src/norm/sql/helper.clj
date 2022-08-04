@@ -66,22 +66,15 @@
                      (into {})))
         rc [:information-schema/referential-constraints :rc]
         ccu [:information_schema/constraint_column_usage :ccu]
-        refs (cond-> db
-               (= "PostgreSQL" db-type)
-               (select [[rc
-                         :join kcu {:rc/constraint-schema :kcu/constraint-schema :rc/constraint-name :kcu/constraint-name}]
-                        :join ccu {:rc/constraint-schema :ccu/constraint-schema :rc/constraint-name :ccu/constraint-name}]
-                       [[:kcu/table-name :fktable-name]
-                        [:kcu/column-name :fkcolumn-name]
-                        [:ccu/table-name :pktable-name]
-                        #_[:ccu/column-name :pkcolumn-name]]
-                       {:rc/constraint-schema [:ilike schema]})
-               (= "H2" db-type)
-               (select :information-schema/cross-references
-                       [:pktable-name :pkcolumn-name :fktable-name :fkcolumn-name]
-                       {:fktable-schema [:ilike schema]
-                        :fktable-name tables})
-               true core/fetch!)
+        refs (-> db
+                 (select [[rc :join kcu {:rc/constraint-schema :kcu/constraint-schema :rc/constraint-name :kcu/constraint-name}]
+                          :join ccu {:rc/constraint-schema :ccu/constraint-schema :rc/unique-constraint-name :ccu/constraint-name}]
+                         [[:kcu/table-name :fktable-name]
+                          [:kcu/column-name :fkcolumn-name]
+                          [:ccu/table-name :pktable-name]
+                          [:ccu/column-name :pkcolumn-name]]
+                         {:rc/constraint-schema [:ilike schema]})
+                 core/fetch!)
         join-tables (->> tables (filter (comp #(or (nil? %) (str/includes? % ",")) pks)) (into #{}))
         belongs-to (->> refs
                         (map (juxt :fktable-name

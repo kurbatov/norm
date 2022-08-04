@@ -7,7 +7,7 @@
   (testing "Finding entities in the existing database"
     (with-open [conn (jdbc/get-connection {:dbtype "h2:mem"})]
       (jdbc/execute! conn ["CREATE TABLE people (id BIGSERIAL PRIMARY KEY, name VARCHAR(100), gender VARCHAR(10), birthday DATE)"])
-      (jdbc/execute! conn ["CREATE TABLE contacts (id BIGSERIAL PRIMARY KEY, person_id BIGINT REFERENCES people (id), type VARCHAR(32), value VARCHAR(128))"])
+      (jdbc/execute! conn ["CREATE TABLE contacts (id BIGSERIAL PRIMARY KEY, person_id BIGINT REFERENCES people (id), type VARCHAR(32), \"value\" VARCHAR(128))"])
       (jdbc/execute! conn ["CREATE TABLE users (id BIGINT PRIMARY KEY REFERENCES people (id), login VARCHAR(100), role VARCHAR(50), active BOOLEAN DEFAULT true)"])
       (jdbc/execute! conn ["CREATE TABLE secrets (id BIGINT PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE, secret VARCHAR(256))"])
       (jdbc/execute! conn ["CREATE TABLE employees (id BIGSERIAL PRIMARY KEY REFERENCES people (id), supervisor_id BIGINT REFERENCES employees (id), salary NUMERIC(19, 4), active BOOLEAN DEFAULT true)"])

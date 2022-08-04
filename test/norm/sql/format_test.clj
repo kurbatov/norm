@@ -37,7 +37,9 @@
 (deftest format-field-test
   (is (= "NULL" (f/format-field nil)) "nil should be inlined")
   (is (= "id" (f/format-field :id)) "Plain field doesn't get quoted.")
+  (is (= "\"value\"" (f/format-field :value)) "Reserved word should be quoted.")
   (is (= "\"user\".id" (f/format-field :user/id)) "Namespace is a quoted prefix.")
+  (is (= "\"contact\".\"value\"" (f/format-field :contact/value)) "Reserved word should be quoted when namespaced.")
   (is (= "name AS \"full-name\"" (f/format-field :name :full-name)) "Alias gets quoted.")
   (is (= "name AS \"full-name\"" (f/format-field [:name :full-name])) "Aliased field may be supplied as a vector.")
   (is (= "\"employee\".name AS \"full-name\"" (f/format-field :employee/name :full-name)))

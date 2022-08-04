@@ -43,6 +43,13 @@
 (defn wrapper [op v] (str op (wrap v)))
 (defn ternary [k op v1 sep v2] (wrap (str/join " " [k op v1 sep v2])))
 
+(def reserved
+  "Reserved words which should be quoted if encountered as a field name."
+  #{"value"})
+
+(defn quote-reserved [x]
+  (if (reserved x) (sql-quote x) x))
+
 (defn format-target [x]
   (*->db-case*
    (if (namespace x)
@@ -52,8 +59,8 @@
 (defn format-keyword-quoted [x]
   (*->db-case*
    (if (namespace x)
-     (str (sql-quote (namespace x)) "." (name x))
-     (name x))))
+     (str (sql-quote (namespace x)) "." (quote-reserved (name x)))
+     (quote-reserved (name x)))))
 
 (declare format-field)
 
