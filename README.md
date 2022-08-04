@@ -45,7 +45,7 @@ among dependencies. **norm** supports H2 and PostgreSQL as of now, so check if a
 one of the following is present:
 
 ```clojure
-[com.h2database/h2 "1.4.200"]
+[com.h2database/h2 "2.1.214"]
 [org.postgresql/postgresql "42.2.12"]
 ```
 
@@ -134,7 +134,7 @@ If you want multiple commands executed in the same transaction it may be achieve
 (let [{:keys [user person]} repository]
   (-> (norm/create user {:login "admin"})
       (norm/then (norm/create person {:name "John Doe"}))
-      (norm/then #(norm/create-relation user (:id (first $)) :preson (:id (second $))))
+      (norm/then #(norm/create-relation user (:id (first $)) :person (:id (second $))))
       norm/execute!))
 ```
 
@@ -150,7 +150,7 @@ using provided helper method:
 
 ```clojure
 (require '[norm.sql.helper :refer [find-entities]])
-(find-entities {:db db :schema "public"}) ; :schema may be ommitted for autodetection
+(find-entities {:db db :schema "public"}) ; :schema may be omitted for auto-detection
 ```
 
 This helper method works only for H2 and PostgreSQL currently.
