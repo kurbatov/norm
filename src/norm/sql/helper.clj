@@ -2,7 +2,7 @@
   (:require [clojure.string :as str]
             [camel-snake-kebab.core :refer [->kebab-case-keyword]]
             [norm.core :as core]
-            [norm.sql :refer [select get-db-meta]]))
+            [norm.sql :refer [select]]))
 
 (def ->key ->kebab-case-keyword)
 
@@ -40,9 +40,7 @@
    However it is possible to build a relation using unconstrained column
    with handwritten entity description."
   [{:keys [db schema]}]
-  (let [db-meta (get-db-meta db)
-        db-type (.getDatabaseProductName db-meta)
-        schema (or schema
+  (let [schema (or schema
                    (->> (select db nil [['(current-schema) :current-schema]])
                         core/fetch!
                         first

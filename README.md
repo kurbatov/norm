@@ -34,11 +34,11 @@ TODO
 
 ## Usage in a nutshell
 
-Add following dependency into the `project.clj` or `deps.edn`:
+Please, use jitpack repository in order to add it as a dependency to your project:
+[![](https://jitpack.io/v/kurbatov/norm.svg)](https://jitpack.io/#kurbatov/norm).
 
-```clojure
-[norm "0.1.0"]
-```
+`norm`` will be available from clojars as
+soon as the documentation is finished.
 
 Also you want to ensure that there is a JDBC driver for the database of your choice
 among dependencies. **norm** supports H2 and PostgreSQL as of now, so check if at least
@@ -573,7 +573,16 @@ TODO prefixing identifiers when building query with the name of an entity and `^
 
 ## Clear Exit Plan
 
-TODO describe how to get down to SQL building functions, `HoneySQL`, `sqlingvo` and bare `jdbc.next`.
+If `norm` does not quite work for you in some scenarios, it is possible to get down a couple of layers of abstraction.
+
+Consider the [low level query builder](#low-level-query-builder) in order to compose and execute SQL queries using
+`norm` DSL. This DSL is used internally by the high-level API. It enables you defining your very own high-level API that
+fits your case using already existing building blocks.
+
+If you ever want to write a raw SQL query as a plain string, there is
+[`next.jdbc`](https://github.com/seancorfield/next-jdbc) that can execute it. `norm` uses it as a transitive dependency
+in order to execute queries composed with high-level DSL. You can mix and match both of them in your project as you see
+fit and completely migrate from one to another when time comes.
 
 ## Similar Solutions
 

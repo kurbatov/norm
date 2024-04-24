@@ -185,7 +185,7 @@
   ([db source fields where order offset limit] (select db source fields where order offset limit nil))
   ([db source fields where order offset limit jdbc-opts]
    (-> (->SQLQuery source fields where order offset limit jdbc-opts)
-       (with-meta (merge jdbc-opts {:db db})))))
+       (with-meta (assoc jdbc-opts :db db)))))
 
 (defn join
   "Adds `source` to the query joining it with specified `op`eration.
